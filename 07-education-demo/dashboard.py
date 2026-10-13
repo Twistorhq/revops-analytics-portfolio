@@ -225,22 +225,26 @@ def _trend_svg(school_series, district_series, periods):
         )
         for a, b in dpts:
             parts.append(f'<circle cx="{a:.1f}" cy="{b:.1f}" r="3.6" fill="#0f766e"/>')
-    for school in _extreme_schools(school_series, periods):
+    for j, school in enumerate(_labeled_schools(school_series, periods)):
         vals = [(p, r) for p, r in school_series[school].items() if r is not None]
         if not vals:
             continue
         p, r = vals[-1]
         i = periods.index(p)
+        # Stagger alternate labels so neighboring lines don't collide.
+        dy = 4 if j % 2 == 0 else -10
         parts.append(
-            f'<text x="{x(i) + 8:.1f}" y="{y(r) + 4:.1f}" font-size="11.5" '
+            f'<text x="{x(i) + 8:.1f}" y="{y(r) + dy:.1f}" font-size="11.5" '
             f'fill="#5d6470">{html.escape(school)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
 
 
-def _extreme_schools(school_series, periods):
-    """Highest- and lowest-rate schools by latest available period."""
+def _labeled_schools(school_series, periods):
+    """Top-2 and bottom-2 schools by latest available period — the four
+    lines that define the chart's spread. TW-492: with real variation in
+    the data, four labels read the story; two left the middle anonymous."""
     latest = {}
     for s, d in school_series.items():
         for p in reversed(periods):
@@ -249,9 +253,14 @@ def _extreme_schools(school_series, periods):
                 break
     if not latest:
         return []
-    top = max(latest, key=latest.get)
-    bottom = min(latest, key=latest.get)
-    return [top] if top == bottom else [top, bottom]
+    ranked = sorted(latest, key=latest.get)
+    picks = []
+    for s in (ranked[-1], ranked[-2], ranked[0], ranked[1]):
+        if s not in picks:
+            picks.append(s)
+        if len(picks) == 4:
+            break
+    return picks
 
 
 def _options(values, element_id, label):

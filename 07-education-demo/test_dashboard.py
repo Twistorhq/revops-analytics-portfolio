@@ -90,6 +90,67 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("radial-gradient", lowered)
         self.assertNotIn("lorem", lowered)
 
+    # TW-492: the chart must show real variation between schools — wide
+    # spread and distinct trajectories, from the data, not the scale.
+    def _school_series(self):
+        from attendance import summarize
+
+        summary = summarize(
+            demo_rows(),
+            district="NKC-DEMO",
+            allowed_schools=DISTRICT_SCHOOL_NAMES,
+        )
+        by_key = {
+            (m["school"], m["period"]): m["attendance_rate"]
+            for m in summary["metrics"]
+        }
+        periods = ["2026-09", "2026-10", "2026-11"]
+        return {
+            s: {p: by_key.get((s, p)) for p in periods}
+            for s in DISTRICT_SCHOOL_NAMES
+        }, periods
+
+    def test_chart_spread_exceeds_threshold(self):
+        series, periods = self._school_series()
+        for p in periods:
+            vals = [r for s in series for r in [series[s][p]] if r is not None]
+            spread = max(vals) - min(vals)
+            # every period shows a wide, honest spread between schools
+            self.assertGreater(
+                spread, 0.08, f"period {p}: spread {spread:.1%} too narrow"
+            )
+
+    def test_distinct_trajectories(self):
+        series, periods = self._school_series()
+        sep, oct_, nov = periods
+        # climbing: Cedar Ridge improves Sep -> Oct
+        self.assertGreater(
+            series["Cedar Ridge Elementary"][oct_]
+            - series["Cedar Ridge Elementary"][sep],
+            0.02,
+        )
+        # declining: Harlow Middle falls Sep -> Oct
+        self.assertLess(
+            series["Harlow Middle"][oct_] - series["Harlow Middle"][sep],
+            -0.01,
+        )
+        # volatile: Riverside swings hard both directions
+        riv = series["Riverside Elementary"]
+        self.assertGreater(riv[oct_] - riv[sep], 0.04)
+        self.assertLess(riv[nov] - riv[oct_], -0.04)
+
+    def test_four_schools_labeled_on_chart(self):
+        series, periods = self._school_series()
+        latest = {}
+        for s, d in series.items():
+            for p in reversed(periods):
+                if d.get(p) is not None:
+                    latest[s] = d[p]
+                    break
+        ranked = sorted(latest, key=latest.get)
+        for s in (ranked[-1], ranked[-2], ranked[0], ranked[1]):
+            self.assertIn(s, self.page)
+
 
 if __name__ == "__main__":
     unittest.main()

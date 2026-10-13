@@ -246,26 +246,64 @@ def demo() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# TW-490: richer synthetic district. Edge cases a real district actually has:
-# a near-perfect school, a struggling school with a chronic-absence cluster,
-# a district-wide November dip (flu season), one school missing a whole
-# period (data gap), mid-year transfer students, and a tiny alternative
-# school where small denominators make the weighted math matter.
-# Strictly additive — demo_csv()/demo_mapping() above are untouched.
+# TW-490: richer synthetic district. TW-492: each school gets its own
+# trajectory — per-period absence-probability deltas ("trend") on top of the
+# base rate, so the chart shows real variation instead of parallel lines:
+# a steady top school, a climbing turnaround, a declining school, a
+# volatile school, a worsening struggler, a data gap, a flu-hit high
+# school, and a tiny noisy alternative school. All patterns a real
+# district actually has. Strictly additive — demo_csv()/demo_mapping()
+# above are untouched.
 
 # (period, instructional days)
 DISTRICT_PERIODS = (("2026-09", 20), ("2026-10", 21), ("2026-11", 15))
 
 # (school name, enrollment, base daily absence probability, options)
+# options["trend"]: per-period absence-probability deltas (sep, oct, nov)
+#   applied on top of the base rate — this is what gives each school its
+#   own trajectory. The shared NOVEMBER_DIP still applies in 2026-11.
 DISTRICT_SCHOOLS = (
-    ("Brookfield Elementary", 420, 0.015, {}),
-    ("Cedar Ridge Elementary", 380, 0.050, {}),
-    ("Maple Grove Elementary", 350, 0.070, {}),
-    ("Riverside Elementary", 310, 0.060, {}),
-    ("Harlow Middle", 520, 0.120, {"chronic_share": 0.08, "chronic_rate": 0.35}),
-    ("Westfield Middle", 460, 0.080, {"gap_period": "2026-10"}),
-    ("Northgate High", 780, 0.090, {"november_dip": 0.05}),
-    ("Summit Alternative", 14, 0.100, {"partial_november": 4}),
+    # Steady: near-perfect, holds its level through flu season.
+    ("Brookfield Elementary", 420, 0.015, {"trend": (0.0, -0.002, -0.010)}),
+    # Climbing: turnaround story — intervention working, rate rising.
+    ("Cedar Ridge Elementary", 380, 0.100, {"trend": (-0.015, -0.035, -0.055)}),
+    # Declining: slipping month over month.
+    ("Maple Grove Elementary", 350, 0.070, {"trend": (0.0, +0.015, +0.035)}),
+    # Volatile: big swings — strong October, rough September and November.
+    ("Riverside Elementary", 310, 0.060, {"trend": (+0.030, -0.030, +0.030)}),
+    # Worsening: struggling school with a chronic-absence cluster,
+    # drifting further down.
+    (
+        "Harlow Middle",
+        520,
+        0.115,
+        {
+            "trend": (+0.005, +0.015, +0.030),
+            "chronic_share": 0.08,
+            "chronic_rate": 0.35,
+        },
+    ),
+    # Data gap: nothing reported in October; line breaks, never interpolated.
+    (
+        "Westfield Middle",
+        460,
+        0.080,
+        {"trend": (0.0, 0.0, -0.020), "gap_period": "2026-10"},
+    ),
+    # Flu-hit: hit harder than average by the November seasonal bump.
+    (
+        "Northgate High",
+        780,
+        0.090,
+        {"trend": (-0.005, -0.005, -0.005), "november_dip": 0.05},
+    ),
+    # Tiny and noisy: 14 students — small denominators swing the rate.
+    (
+        "Summit Alternative",
+        14,
+        0.100,
+        {"trend": (+0.030, -0.030, +0.020), "partial_november": 4},
+    ),
 )
 
 DISTRICT_SCHOOL_NAMES = frozenset(name for name, _, _, _ in DISTRICT_SCHOOLS)
@@ -298,6 +336,7 @@ def demo_district_csv(seed: int = 20261013) -> str:
     for name, size, base_rate, opts in DISTRICT_SCHOOLS:
         slug = "".join(name.lower().split())
         n_transfer = max(1, int(size * TRANSFER_SHARE))
+        trend = opts.get("trend", (0.0, 0.0, 0.0))
         for i in range(size):
             is_transfer = i >= size - n_transfer
             student = (
@@ -306,7 +345,7 @@ def demo_district_csv(seed: int = 20261013) -> str:
             chronic = "chronic_share" in opts and (i % 100) < int(
                 opts["chronic_share"] * 100
             )
-            for period, days in DISTRICT_PERIODS:
+            for pi, (period, days) in enumerate(DISTRICT_PERIODS):
                 if opts.get("gap_period") == period:
                     continue  # the data gap: nothing reported this period
                 if is_transfer and period == "2026-09":
@@ -314,11 +353,15 @@ def demo_district_csv(seed: int = 20261013) -> str:
                 enrolled = days
                 if period == "2026-11" and i < opts.get("partial_november", 0):
                     enrolled = 6  # disenrolled mid-period
-                propensity = base_rate
-                if chronic:
-                    propensity = opts["chronic_rate"]
+                # TW-492: the school's own trajectory, on top of the base rate.
+                propensity = (opts["chronic_rate"] if chronic else base_rate) + trend[
+                    pi
+                ]
                 if period == "2026-11":
                     propensity += NOVEMBER_DIP + opts.get("november_dip", 0.0)
+                # Clamp: a probability, always. Trends never push it negative
+                # or absurd — the generator stays honest at the edges.
+                propensity = min(max(propensity, 0.001), 0.60)
                 # Per-student propensity: Beta(mean=propensity), so some
                 # students are rarely absent and a few are often absent.
                 a = max(propensity * 30, 0.5)
