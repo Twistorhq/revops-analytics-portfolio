@@ -31,9 +31,10 @@ counselor-facing risk tiers. That is what an intervention team acts on:
 **Validation commands (all run fresh this session):**
 - `python3 -m pytest . -q` → `60 passed, 5 subtests passed`
 - Stratified Cox fit on landmark cohort (n=2,010, 483 events / 24.0%):
-  **C-index 0.7631** (my Harrell's C; lifelines' partial-hazard C is 0.6479
+  **C-index 0.7631** (full cohort; held-out split: 0.7650 — no optimism gap).
+  My Harrell's C; lifelines' partial-hazard C is 0.6479
   because partial hazards are not comparable across strata — mine uses
-  P(event by 21d), the correct cross-stratum score; documented in code).
+  P(event by 21d), the correct cross-stratum score; documented in code.
 
 ## The PH-assumption story (honest)
 The unstratified fit violated proportional hazards for `first30_rate`
@@ -85,10 +86,11 @@ without the fix, risk scores were silently misaligned (C-index 0.41).
    quintiles = 15 bins; worst |predicted − KM-observed| = 0.051.
    (Horizons are instructional days — the brief's 30/60/90 assumed a longer
    window than November's 21 school days; adapted honestly.)
-6. **Backtest.** Train/test split stratified by event; all metrics reported
-   on the held-out set. No RED run logs captured for the survival module
-   itself (GREEN-only runs); the RED record is the pre-registration of
-   exact event-time assertions in tests 1-3.
+6. **Backtest.** Train/test split stratified by event; headline metrics
+   reported on the held-out set (Cox C=0.7650) with the full-cohort fit
+   (C=0.7631) showing no optimism gap. No RED run logs captured for the
+   survival module itself (GREEN-only runs); the RED record is the
+   pre-registration of exact event-time assertions in tests 1-3.
 7. **Baseline.** Naive ordering (rank by first30_rate): C=0.7359. Cox:
    0.7631 — beats the naive rule. Head-to-head vs TW-494 logistic on
    identical students/split/ground-truth: logistic C=0.8006, Cox C=0.7650.
