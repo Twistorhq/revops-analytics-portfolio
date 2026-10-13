@@ -36,8 +36,8 @@ class DashboardTests(unittest.TestCase):
         rows = re.findall(
             r'<tr data-school="([^"]+)" data-period="([^"]+)">', self.page
         )
-        # 8 schools x 3 periods = 24 rows: 23 data + 1 explicit gap row
-        self.assertEqual(len(rows), 24)
+        # 12 schools x 3 periods = 36 rows: 35 data + 1 explicit gap row
+        self.assertEqual(len(rows), 36)
         self.assertEqual({s for s, _ in rows}, set(DISTRICT_SCHOOL_NAMES))
         self.assertEqual({p for _, p in rows}, {"2026-09", "2026-10", "2026-11"})
 
@@ -45,7 +45,9 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("No data reported", self.page)
         self.assertIn('<span class="flag gap">Data gap</span>', self.page)
         # the gap row still carries filter attributes
-        self.assertIn('data-school="Westfield Middle" data-period="2026-10"', self.page)
+        self.assertIn(
+            'data-school="New Mark Middle School" data-period="2026-10"', self.page
+        )
 
     def test_headline_rate_is_weighted(self):
         rows = demo_rows()
@@ -77,7 +79,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("zero enrolled-day denominator", self.page)
 
     def test_small_school_flagged(self):
-        # Summit Alternative has 14 students: small-n flag must show
+        # Golden Oaks Education Center has 18 students: small-n flag must show
         self.assertIn("Small n", self.page)
 
     def test_demo_district_csv_deterministic(self):
@@ -89,6 +91,64 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn("linear-gradient", lowered)
         self.assertNotIn("radial-gradient", lowered)
         self.assertNotIn("lorem", lowered)
+
+    # TW-492: the chart must show real variation between schools — wide
+    # spread and distinct trajectories, from the data, not the scale.
+    def _school_series(self):
+        from attendance import summarize
+
+        summary = summarize(
+            demo_rows(),
+            district="NKC-DEMO",
+            allowed_schools=DISTRICT_SCHOOL_NAMES,
+        )
+        by_key = {
+            (m["school"], m["period"]): m["attendance_rate"] for m in summary["metrics"]
+        }
+        periods = ["2026-09", "2026-10", "2026-11"]
+        return {
+            s: {p: by_key.get((s, p)) for p in periods} for s in DISTRICT_SCHOOL_NAMES
+        }, periods
+
+    def test_chart_spread_exceeds_threshold(self):
+        series, periods = self._school_series()
+        for p in periods:
+            vals = [r for s in series for r in [series[s][p]] if r is not None]
+            spread = max(vals) - min(vals)
+            # every period shows a wide, honest spread between schools
+            self.assertGreater(
+                spread, 0.08, f"period {p}: spread {spread:.1%} too narrow"
+            )
+
+    def test_distinct_trajectories(self):
+        series, periods = self._school_series()
+        sep, oct_, nov = periods
+        # climbing: Oak Park High School improves Sep -> Oct
+        self.assertGreater(
+            series["Oak Park High School"][oct_] - series["Oak Park High School"][sep],
+            0.015,
+        )
+        # declining: Antioch Middle School falls across the term (Sep -> Nov)
+        self.assertLess(
+            series["Antioch Middle School"][nov] - series["Antioch Middle School"][sep],
+            -0.03,
+        )
+        # volatile: North Kansas City High School swings hard both directions
+        riv = series["North Kansas City High School"]
+        self.assertGreater(riv[oct_] - riv[sep], 0.04)
+        self.assertLess(riv[nov] - riv[oct_], -0.04)
+
+    def test_four_schools_labeled_on_chart(self):
+        series, periods = self._school_series()
+        latest = {}
+        for s, d in series.items():
+            for p in reversed(periods):
+                if d.get(p) is not None:
+                    latest[s] = d[p]
+                    break
+        ranked = sorted(latest, key=latest.get)
+        for s in (ranked[-1], ranked[-2], ranked[0], ranked[1]):
+            self.assertIn(s, self.page)
 
 
 if __name__ == "__main__":

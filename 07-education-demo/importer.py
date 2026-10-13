@@ -246,26 +246,119 @@ def demo() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# TW-490: richer synthetic district. Edge cases a real district actually has:
-# a near-perfect school, a struggling school with a chronic-absence cluster,
-# a district-wide November dip (flu season), one school missing a whole
-# period (data gap), mid-year transfer students, and a tiny alternative
-# school where small denominators make the weighted math matter.
-# Strictly additive — demo_csv()/demo_mapping() above are untouched.
+# TW-490: richer synthetic district. TW-492: each school gets its own
+# trajectory — per-period absence-probability deltas ("trend") on top of the
+# base rate, so the chart shows real variation instead of parallel lines:
+# a steady top school, a climbing turnaround, a declining school, a
+# volatile school, a worsening struggler, a data gap, a flu-hit high
+# school, and a tiny noisy alternative school. All patterns a real
+# district actually has. Strictly additive — demo_csv()/demo_mapping()
+# above are untouched.
 
 # (period, instructional days)
 DISTRICT_PERIODS = (("2026-09", 20), ("2026-10", 21), ("2026-11", 15))
 
 # (school name, enrollment, base daily absence probability, options)
+# options["trend"]: per-period absence-probability deltas (sep, oct, nov)
+#   applied on top of the base rate — this is what gives each school its
+#   own trajectory. The shared NOVEMBER_DIP still applies in 2026-11.
+#
+# TW-493: school NAMES are real — the North Kansas City Schools district's
+# public roster (nkcschools.org): 4 high schools, 4 middle schools,
+# 3 elementaries, 1 alternative center. The DATA is synthetic; every
+# student, absence, and rate below is generated. Names are real so the
+# demonstrator reads as the district's own.
 DISTRICT_SCHOOLS = (
-    ("Brookfield Elementary", 420, 0.015, {}),
-    ("Cedar Ridge Elementary", 380, 0.050, {}),
-    ("Maple Grove Elementary", 350, 0.070, {}),
-    ("Riverside Elementary", 310, 0.060, {}),
-    ("Harlow Middle", 520, 0.120, {"chronic_share": 0.08, "chronic_rate": 0.35}),
-    ("Westfield Middle", 460, 0.080, {"gap_period": "2026-10"}),
-    ("Northgate High", 780, 0.090, {"november_dip": 0.05}),
-    ("Summit Alternative", 14, 0.100, {"partial_november": 4}),
+    # Steady: near-perfect, holds its level through flu season.
+    (
+        "Staley High School",
+        1450,
+        0.015,
+        {"trend": (0.0, -0.002, -0.010), "mf_bump": 0.10},
+    ),
+    # Climbing: turnaround story — intervention working, rate rising.
+    (
+        "Oak Park High School",
+        1380,
+        0.100,
+        {"trend": (-0.015, -0.035, -0.055), "mf_bump": 0.20},
+    ),
+    # Flu-hit: hit harder than average by the November seasonal bump.
+    (
+        "Winnetonka High School",
+        1320,
+        0.090,
+        {"trend": (-0.005, -0.005, -0.005), "november_dip": 0.05, "mf_bump": 0.25},
+    ),
+    # Volatile: big swings — strong October, rough September and November.
+    (
+        "North Kansas City High School",
+        1500,
+        0.060,
+        {"trend": (+0.030, -0.030, +0.030), "mf_bump": 0.30},
+    ),
+    # Worsening: struggling school with a chronic-absence cluster,
+    # drifting further down.
+    (
+        "Antioch Middle School",
+        720,
+        0.115,
+        {
+            "trend": (+0.005, +0.015, +0.030),
+            "chronic_share": 0.08,
+            "chronic_rate": 0.35,
+            "mf_bump": 0.20,
+        },
+    ),
+    # Data gap: nothing reported in October; line breaks, never interpolated.
+    (
+        "New Mark Middle School",
+        680,
+        0.080,
+        {"trend": (0.0, 0.0, -0.020), "gap_period": "2026-10", "mf_bump": 0.15},
+    ),
+    # Declining: slipping month over month.
+    (
+        "Maple Park Middle School",
+        700,
+        0.070,
+        {"trend": (0.0, +0.015, +0.035), "mf_bump": 0.15},
+    ),
+    # Steady mid: holds a solid mid-90s rate all term.
+    (
+        "Northgate Middle School",
+        690,
+        0.050,
+        {"trend": (0.0, -0.005, -0.010), "mf_bump": 0.10},
+    ),
+    # Steady elementary: strong, consistent attendance.
+    (
+        "Bell Prairie Elementary",
+        460,
+        0.030,
+        {"trend": (0.0, -0.003, -0.008), "mf_bump": 0.08},
+    ),
+    # Climbing elementary: improving every month.
+    (
+        "Briarcliff Elementary",
+        440,
+        0.095,
+        {"trend": (-0.010, -0.020, -0.030), "mf_bump": 0.12},
+    ),
+    # Slipping elementary: drifting down.
+    (
+        "Chapel Hill Elementary",
+        420,
+        0.070,
+        {"trend": (0.0, +0.010, +0.025), "mf_bump": 0.12},
+    ),
+    # Tiny and noisy: 18 students — small denominators swing the rate.
+    (
+        "Golden Oaks Education Center",
+        18,
+        0.100,
+        {"trend": (+0.030, -0.030, +0.020), "partial_november": 4, "mf_bump": 0.15},
+    ),
 )
 
 DISTRICT_SCHOOL_NAMES = frozenset(name for name, _, _, _ in DISTRICT_SCHOOLS)
@@ -298,6 +391,7 @@ def demo_district_csv(seed: int = 20261013) -> str:
     for name, size, base_rate, opts in DISTRICT_SCHOOLS:
         slug = "".join(name.lower().split())
         n_transfer = max(1, int(size * TRANSFER_SHARE))
+        trend = opts.get("trend", (0.0, 0.0, 0.0))
         for i in range(size):
             is_transfer = i >= size - n_transfer
             student = (
@@ -306,7 +400,7 @@ def demo_district_csv(seed: int = 20261013) -> str:
             chronic = "chronic_share" in opts and (i % 100) < int(
                 opts["chronic_share"] * 100
             )
-            for period, days in DISTRICT_PERIODS:
+            for pi, (period, days) in enumerate(DISTRICT_PERIODS):
                 if opts.get("gap_period") == period:
                     continue  # the data gap: nothing reported this period
                 if is_transfer and period == "2026-09":
@@ -314,20 +408,154 @@ def demo_district_csv(seed: int = 20261013) -> str:
                 enrolled = days
                 if period == "2026-11" and i < opts.get("partial_november", 0):
                     enrolled = 6  # disenrolled mid-period
-                propensity = base_rate
-                if chronic:
-                    propensity = opts["chronic_rate"]
+                # TW-492: the school's own trajectory, on top of the base rate.
+                propensity = (opts["chronic_rate"] if chronic else base_rate) + trend[
+                    pi
+                ]
                 if period == "2026-11":
                     propensity += NOVEMBER_DIP + opts.get("november_dip", 0.0)
+                # Clamp: a probability, always. Trends never push it negative
+                # or absurd — the generator stays honest at the edges.
+                propensity = min(max(propensity, 0.001), 0.60)
                 # Per-student propensity: Beta(mean=propensity), so some
                 # students are rarely absent and a few are often absent.
                 a = max(propensity * 30, 0.5)
                 rng = _seeded_rng(seed, name, period, student)
                 student_p = rng.betavariate(a, 30 - a + 0.5)
-                absent = sum(1 for _ in range(enrolled) if rng.random() < student_p)
+                absent = sum(
+                    1
+                    for j in range(enrolled)
+                    if rng.random()
+                    < _day_probability(
+                        student_p,
+                        _INSTRUCTIONAL_DAYS[period][j].weekday(),
+                        opts.get("mf_bump", 0.0),
+                    )
+                )
                 writer.writerow(
                     ["NKC-DEMO", name, student, period, enrolled, enrolled - absent]
                 )
+    return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# TW-493: instructional calendar + daily grain. The monthly rows above are
+# Bernoulli sums; the daily rows below are the same Bernoulli trials
+# written out one per instructional day — same seeded RNG stream per
+# (school, period, student), same draw order, so daily sums reconcile
+# exactly with the monthly rows. Day-of-week and consecutive-day logic
+# (Mon/Fri patterns, absence streaks) need this grain.
+
+import datetime as _datetime
+
+
+def instructional_days() -> dict:
+    """Period -> list of real calendar dates (Mon-Fri only).
+
+    2026-09-01 is a Tuesday. Labor Day etc. are not modeled — the demo
+    uses a clean instructional calendar, documented here and in the README.
+    """
+    counts = dict(DISTRICT_PERIODS)
+    out: dict = {}
+    d = _datetime.date(2026, 9, 1)
+    for period, _ in DISTRICT_PERIODS:
+        dates = []
+        while len(dates) < counts[period]:
+            if d.weekday() < 5:  # Mon-Fri
+                dates.append(d)
+            d += _datetime.timedelta(days=1)
+        out[period] = dates
+    return out
+
+
+_INSTRUCTIONAL_DAYS = instructional_days()
+
+
+def _day_probability(student_p: float, dow: int, mf_bump: float) -> float:
+    """Per-day absence probability.
+
+    TW-493: weekend-adjacent bump — real schools run hotter on Mon/Fri.
+    Same RNG stream as before; only the per-draw probability changes, so
+    monthly and daily grains stay exactly consistent.
+    """
+    if mf_bump and dow in (0, 4):  # Monday, Friday
+        return min(student_p * (1 + mf_bump), 0.95)
+    return student_p
+
+
+def demo_district_daily_csv(seed: int = 20261013, schools: tuple | None = None) -> str:
+    """Deterministic daily-grain synthetic CSV.
+
+    One row per (student, instructional day): District, SchoolName,
+    StudentID, Date, Period, Present (1/0), DayOfWeek (0=Mon..6=Sun).
+    Same seeded RNG stream as demo_district_csv, so per-student per-period
+    sums reconcile exactly with the monthly rows.
+    """
+    days_by_period = instructional_days()
+    chosen = (
+        DISTRICT_SCHOOLS
+        if schools is None
+        else tuple(s for s in DISTRICT_SCHOOLS if s[0] in schools)
+    )
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(
+        [
+            "District",
+            "SchoolName",
+            "StudentID",
+            "Date",
+            "Period",
+            "Present",
+            "DayOfWeek",
+        ]
+    )
+    for name, size, base_rate, opts in chosen:
+        slug = "".join(name.lower().split())
+        n_transfer = max(1, int(size * TRANSFER_SHARE))
+        trend = opts.get("trend", (0.0, 0.0, 0.0))
+        for i in range(size):
+            is_transfer = i >= size - n_transfer
+            student = (
+                f"synth-{slug}-xfer-{i:03d}" if is_transfer else f"synth-{slug}-{i:04d}"
+            )
+            chronic = "chronic_share" in opts and (i % 100) < int(
+                opts["chronic_share"] * 100
+            )
+            for pi, (period, _) in enumerate(DISTRICT_PERIODS):
+                if opts.get("gap_period") == period:
+                    continue
+                if is_transfer and period == "2026-09":
+                    continue
+                # Identical propensity + RNG stream as demo_district_csv:
+                # one Beta draw, then one Bernoulli draw per day in order.
+                propensity = (opts["chronic_rate"] if chronic else base_rate) + trend[
+                    pi
+                ]
+                if period == "2026-11":
+                    propensity += NOVEMBER_DIP + opts.get("november_dip", 0.0)
+                propensity = min(max(propensity, 0.001), 0.60)
+                a = max(propensity * 30, 0.5)
+                rng = _seeded_rng(seed, name, period, student)
+                student_p = rng.betavariate(a, 30 - a + 0.5)
+                dates = days_by_period[period]
+                if period == "2026-11" and i < opts.get("partial_november", 0):
+                    dates = dates[:6]  # disenrolled mid-period, same as monthly
+                mf_bump = opts.get("mf_bump", 0.0)
+                for d in dates:
+                    p_day = _day_probability(student_p, d.weekday(), mf_bump)
+                    absent = rng.random() < p_day
+                    writer.writerow(
+                        [
+                            "NKC-DEMO",
+                            name,
+                            student,
+                            d.isoformat(),
+                            period,
+                            0 if absent else 1,
+                            d.weekday(),
+                        ]
+                    )
     return out.getvalue()
 
 
