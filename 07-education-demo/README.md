@@ -40,3 +40,35 @@ python -m unittest discover -s 07-education-demo -v
 python 07-education-demo/attendance.py
 
 No API keys, real student records or incremental cash spend. Existing ETL/product-wide suites were not rerun for this new isolated slice.
+
+## Import workflow + dashboard (October 13)
+
+**importer.py** — CSV import with explicit column mapping, rejected-row
+diagnostics, and reconciled totals. Mapping problems (missing field, mapped
+header absent from the CSV) fail fast with ValueError. Row-level problems
+become Rejections carrying row number, reason code
+(missing_identifier | bad_count | invalid_counts | duplicate_grain), a
+human-readable detail, and the raw row. `publish()` blocks while any row is
+rejected or totals don't reconcile (source == accepted + rejected).
+
+**dashboard.py** — renders the published mart as a self-contained HTML page
+(stdlib only, no external assets): headline cards (weighted attendance rate,
+enrolled/present days, school and period counts), school + period filters
+(vanilla JS), and a school x period metric table. Aggregate only — no
+student-level data reaches the page. Every render carries the
+"SYNTHETIC SAMPLE DATA" banner.
+
+**Metric definitions** (one definition per metric, everywhere):
+- attendance_rate = SUM(present_days) / SUM(enrolled_days), weighted across
+  records; never an average of per-record rates; null when denominator is 0.
+- Grain: one record per (district, school, student, period).
+
+**Run**
+```
+python -m unittest discover -s 07-education-demo
+python 07-education-demo/importer.py   # import report + published summary
+python 07-education-demo/dashboard.py  # writes attendance-dashboard.html
+```
+
+25 tests pass (8 attendance + 10 importer + 7 dashboard). All data synthetic;
+no real student records, ever.
