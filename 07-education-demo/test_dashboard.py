@@ -101,13 +101,11 @@ class DashboardTests(unittest.TestCase):
             allowed_schools=DISTRICT_SCHOOL_NAMES,
         )
         by_key = {
-            (m["school"], m["period"]): m["attendance_rate"]
-            for m in summary["metrics"]
+            (m["school"], m["period"]): m["attendance_rate"] for m in summary["metrics"]
         }
         periods = ["2026-09", "2026-10", "2026-11"]
         return {
-            s: {p: by_key.get((s, p)) for p in periods}
-            for s in DISTRICT_SCHOOL_NAMES
+            s: {p: by_key.get((s, p)) for p in periods} for s in DISTRICT_SCHOOL_NAMES
         }, periods
 
     def test_chart_spread_exceeds_threshold(self):
