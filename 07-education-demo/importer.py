@@ -4,6 +4,7 @@ no real student records, ever.
 """
 
 import csv
+import hashlib
 import io
 import random
 from dataclasses import dataclass
@@ -242,6 +243,92 @@ def demo() -> dict:
         allowed_schools=frozenset({"North", "South", "East", "West"}),
     )
     return {"import": result.report(), "published": published}
+
+
+# ---------------------------------------------------------------------------
+# TW-490: richer synthetic district. Edge cases a real district actually has:
+# a near-perfect school, a struggling school with a chronic-absence cluster,
+# a district-wide November dip (flu season), one school missing a whole
+# period (data gap), mid-year transfer students, and a tiny alternative
+# school where small denominators make the weighted math matter.
+# Strictly additive — demo_csv()/demo_mapping() above are untouched.
+
+# (period, instructional days)
+DISTRICT_PERIODS = (("2026-09", 20), ("2026-10", 21), ("2026-11", 15))
+
+# (school name, enrollment, base daily absence probability, options)
+DISTRICT_SCHOOLS = (
+    ("Brookfield Elementary", 420, 0.015, {}),
+    ("Cedar Ridge Elementary", 380, 0.050, {}),
+    ("Maple Grove Elementary", 350, 0.070, {}),
+    ("Riverside Elementary", 310, 0.060, {}),
+    ("Harlow Middle", 520, 0.120, {"chronic_share": 0.08, "chronic_rate": 0.35}),
+    ("Westfield Middle", 460, 0.080, {"gap_period": "2026-10"}),
+    ("Northgate High", 780, 0.090, {"november_dip": 0.05}),
+    ("Summit Alternative", 14, 0.100, {"partial_november": 4}),
+)
+
+DISTRICT_SCHOOL_NAMES = frozenset(name for name, _, _, _ in DISTRICT_SCHOOLS)
+
+NOVEMBER_DIP = 0.04  # district-wide flu-season absence bump in 2026-11
+TRANSFER_SHARE = 0.05  # students whose enrollment starts in October
+
+
+def _seeded_rng(master_seed: int, *parts: str) -> random.Random:
+    """Deterministic RNG per (school, period, student) — reruns are
+    byte-identical regardless of iteration order."""
+    digest = hashlib.sha256(f"{master_seed}|{'|'.join(parts)}".encode()).digest()
+    return random.Random(int.from_bytes(digest[:8], "big"))
+
+
+def demo_district_csv(seed: int = 20261013) -> str:
+    """Deterministic synthetic district CSV with real-world edge cases.
+
+    Each enrolled day is a Bernoulli trial against a per-student daily
+    absence propensity drawn from a Beta distribution around the school's
+    base rate — so absence clusters the way it does in real schools
+    (overdispersed), instead of spreading uniformly. Fictional students
+    only; IDs never leave the import layer.
+    """
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(
+        ["District", "SchoolName", "StudentID", "Period", "EnrolledDays", "PresentDays"]
+    )
+    for name, size, base_rate, opts in DISTRICT_SCHOOLS:
+        slug = "".join(name.lower().split())
+        n_transfer = max(1, int(size * TRANSFER_SHARE))
+        for i in range(size):
+            is_transfer = i >= size - n_transfer
+            student = (
+                f"synth-{slug}-xfer-{i:03d}" if is_transfer else f"synth-{slug}-{i:04d}"
+            )
+            chronic = "chronic_share" in opts and (i % 100) < int(
+                opts["chronic_share"] * 100
+            )
+            for period, days in DISTRICT_PERIODS:
+                if opts.get("gap_period") == period:
+                    continue  # the data gap: nothing reported this period
+                if is_transfer and period == "2026-09":
+                    continue  # enrolled starting October
+                enrolled = days
+                if period == "2026-11" and i < opts.get("partial_november", 0):
+                    enrolled = 6  # disenrolled mid-period
+                propensity = base_rate
+                if chronic:
+                    propensity = opts["chronic_rate"]
+                if period == "2026-11":
+                    propensity += NOVEMBER_DIP + opts.get("november_dip", 0.0)
+                # Per-student propensity: Beta(mean=propensity), so some
+                # students are rarely absent and a few are often absent.
+                a = max(propensity * 30, 0.5)
+                rng = _seeded_rng(seed, name, period, student)
+                student_p = rng.betavariate(a, 30 - a + 0.5)
+                absent = sum(1 for _ in range(enrolled) if rng.random() < student_p)
+                writer.writerow(
+                    ["NKC-DEMO", name, student, period, enrolled, enrolled - absent]
+                )
+    return out.getvalue()
 
 
 if __name__ == "__main__":

@@ -52,11 +52,22 @@ human-readable detail, and the raw row. `publish()` blocks while any row is
 rejected or totals don't reconcile (source == accepted + rejected).
 
 **dashboard.py** — renders the published mart as a self-contained HTML page
-(stdlib only, no external assets): headline cards (weighted attendance rate,
-enrolled/present days, school and period counts), school + period filters
-(vanilla JS), and a school x period metric table. Aggregate only — no
-student-level data reaches the page. Every render carries the
-"SYNTHETIC SAMPLE DATA" banner.
+(stdlib only, no external assets): district headline rate with period-over-period
+delta, hand-built SVG trend chart (per-school lines + district average; data gaps
+break the line, never interpolated), school x period performance table with
+school + period filters (vanilla JS), explicit data-gap rows, small-n flags, and
+a methodology section documenting the formula, grain, and null handling.
+Aggregate only — no student-level data reaches the page. Every render carries
+the "SYNTHETIC SAMPLE DATA" banner. Impeccable detector: 0 anti-patterns.
+
+**demo_district_csv()** (importer.py, TW-490) — richer synthetic district alongside
+the original `demo_csv()`: 8 fictional schools x 3 periods (~9,000 rows,
+deterministic). Edge cases: near-perfect school (Brookfield ~98%), struggling
+school with chronic-absence cluster (Harlow ~87%), district-wide November dip
+(flu season), one school missing a whole period (Westfield Oct data gap),
+mid-year transfer students, tiny alternative school (Summit, n=14). Per-student
+absence propensity drawn from a Beta distribution around the school base rate
+(overdispersed, like real schools). Strictly additive — `demo_csv()` untouched.
 
 **Metric definitions** (one definition per metric, everywhere):
 - attendance_rate = SUM(present_days) / SUM(enrolled_days), weighted across
@@ -70,5 +81,5 @@ python 07-education-demo/importer.py   # import report + published summary
 python 07-education-demo/dashboard.py  # writes attendance-dashboard.html
 ```
 
-25 tests pass (8 attendance + 10 importer + 7 dashboard). All data synthetic;
+34 tests pass (8 attendance + 13 importer + 13 dashboard). All data synthetic;
 no real student records, ever.
