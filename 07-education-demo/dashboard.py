@@ -568,7 +568,7 @@ def _callouts_html(callouts):
     parts = ['<section class="block callouts" aria-label="Key findings">']
     parts.append("<h2>What the data is saying</h2>")
     parts.append(
-        '<p class="note">Three findings worth quoting. Every number below is '
+        '<p class="note">Findings worth quoting. Every number below is '
         "computed from the synthetic dataset on this page &mdash; nothing is "
         "hand-written.</p>"
     )
@@ -1080,7 +1080,7 @@ def demo_full() -> str:
 
 
 if __name__ == "__main__":
-    page = demo()
+    page = demo_full()
     with open("attendance-dashboard.html", "w", encoding="utf-8") as fh:
         fh.write(page)
     print(f"wrote attendance-dashboard.html ({len(page):,} bytes)")

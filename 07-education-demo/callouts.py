@@ -120,6 +120,9 @@ def detect_threshold_crosses(series, periods, t: Thresholds):
         if was_below == is_below:
             continue
         if is_below:
+            # +0.5 boost: crossing into warning territory outranks a plain
+            # movement of identical magnitude (detect_movements weights by
+            # |delta| alone) — the regime change is the stronger signal.
             out.append(
                 Callout(
                     template_id="threshold_cross",

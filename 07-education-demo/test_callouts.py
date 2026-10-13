@@ -51,7 +51,7 @@ class MovementTests(unittest.TestCase):
         s = series({"A": [0.93, 0.925, 0.915]})  # -1.0 pt
         self.assertEqual(detect_movements(s, PERIODS, T), [])
 
-    def test_ignores_data_gaps(self):
+    def test_fires_across_data_gaps(self):
         # Sep->Nov are not adjacent in the series order with a gap between;
         # _pop takes the last two non-null which are non-adjacent. -5.0 pts
         # still fires — gaps never silently suppress a real move.
