@@ -60,19 +60,34 @@ a methodology section documenting the formula, grain, and null handling.
 Aggregate only — no student-level data reaches the page. Every render carries
 the "SYNTHETIC SAMPLE DATA" banner. Impeccable detector: 0 anti-patterns.
 
-**demo_district_csv()** (importer.py, TW-490) — richer synthetic district alongside
-the original `demo_csv()`: 8 fictional schools x 3 periods (~9,000 rows,
-deterministic). Edge cases: near-perfect school (Brookfield ~98%), struggling
-school with chronic-absence cluster (Harlow ~87%), district-wide November dip
-(flu season), one school missing a whole period (Westfield Oct data gap),
-mid-year transfer students, tiny alternative school (Summit, n=14). Per-student
-absence propensity drawn from a Beta distribution around the school base rate
-(overdispersed, like real schools). Strictly additive — `demo_csv()` untouched.
+**demo_district_csv()** (importer.py, TW-490/TW-493) — richer synthetic district
+alongside the original `demo_csv()`: 12 real NKC school names x 3 periods
+(~8,800 students, deterministic; names are the district's public roster,
+all data synthetic). Edge cases: near-perfect school (Staley ~98%), struggling
+school with chronic-absence cluster (Antioch ~87%), district-wide November dip
+(flu season), one school missing a whole period (New Mark Oct data gap),
+mid-year transfer students, tiny alternative center (Golden Oaks, n=18).
+Per-student absence propensity drawn from a Beta distribution around the
+school base rate (overdispersed, like real schools). `demo_district_daily_csv()`
+(TW-493) emits the same trials at daily grain — Mon-Fri instructional calendar,
+DayOfWeek per row — so streak and weekday metrics reconcile exactly with the
+monthly rows. Strictly additive — `demo_csv()` untouched.
 
 **Metric definitions** (one definition per metric, everywhere):
 - attendance_rate = SUM(present_days) / SUM(enrolled_days), weighted across
   records; never an average of per-record rates; null when denominator is 0.
-- Grain: one record per (district, school, student, period).
+- Grain: one record per (district, school, student, period); daily grain is
+  one record per (student, instructional day) in `metrics.py`.
+- chronic_early_warning = students with first-30-day absence pace >= 10% /
+  qualifying students — the predictive version of chronic absenteeism.
+- monday_friday_ratio = (absent/enrolled on Mon+Fri) / (absent/enrolled on
+  Tue-Thu); null when the midweek denominator is zero.
+- streak3_students = students with a 3+ consecutive-absent-day streak /
+  all students (streaks run over consecutive instructional days).
+- recovery_rate = chronic-in-Sep students back under 10% in Oct /
+  chronic-in-Sep students; null when none were chronic.
+- instructional_days_lost = SUM(1 - present) over all student-days;
+  each lost day is a day of attendance-based funding not earned.
 
 **Run**
 ```
@@ -81,5 +96,5 @@ python 07-education-demo/importer.py   # import report + published summary
 python 07-education-demo/dashboard.py  # writes attendance-dashboard.html
 ```
 
-34 tests pass (8 attendance + 13 importer + 13 dashboard). All data synthetic;
-no real student records, ever.
+49 tests pass (8 attendance + 13 importer + 16 dashboard + 12 metrics). All data synthetic;
+school names are the district's real public roster; no real student records, ever.

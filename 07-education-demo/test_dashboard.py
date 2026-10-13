@@ -36,8 +36,8 @@ class DashboardTests(unittest.TestCase):
         rows = re.findall(
             r'<tr data-school="([^"]+)" data-period="([^"]+)">', self.page
         )
-        # 8 schools x 3 periods = 24 rows: 23 data + 1 explicit gap row
-        self.assertEqual(len(rows), 24)
+        # 12 schools x 3 periods = 36 rows: 35 data + 1 explicit gap row
+        self.assertEqual(len(rows), 36)
         self.assertEqual({s for s, _ in rows}, set(DISTRICT_SCHOOL_NAMES))
         self.assertEqual({p for _, p in rows}, {"2026-09", "2026-10", "2026-11"})
 
@@ -45,7 +45,9 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("No data reported", self.page)
         self.assertIn('<span class="flag gap">Data gap</span>', self.page)
         # the gap row still carries filter attributes
-        self.assertIn('data-school="Westfield Middle" data-period="2026-10"', self.page)
+        self.assertIn(
+            'data-school="New Mark Middle School" data-period="2026-10"', self.page
+        )
 
     def test_headline_rate_is_weighted(self):
         rows = demo_rows()
@@ -77,7 +79,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("zero enrolled-day denominator", self.page)
 
     def test_small_school_flagged(self):
-        # Summit Alternative has 14 students: small-n flag must show
+        # Golden Oaks Education Center has 18 students: small-n flag must show
         self.assertIn("Small n", self.page)
 
     def test_demo_district_csv_deterministic(self):
@@ -121,19 +123,18 @@ class DashboardTests(unittest.TestCase):
     def test_distinct_trajectories(self):
         series, periods = self._school_series()
         sep, oct_, nov = periods
-        # climbing: Cedar Ridge improves Sep -> Oct
+        # climbing: Oak Park High School improves Sep -> Oct
         self.assertGreater(
-            series["Cedar Ridge Elementary"][oct_]
-            - series["Cedar Ridge Elementary"][sep],
-            0.02,
+            series["Oak Park High School"][oct_] - series["Oak Park High School"][sep],
+            0.015,
         )
-        # declining: Harlow Middle falls Sep -> Oct
+        # declining: Antioch Middle School falls across the term (Sep -> Nov)
         self.assertLess(
-            series["Harlow Middle"][oct_] - series["Harlow Middle"][sep],
-            -0.01,
+            series["Antioch Middle School"][nov] - series["Antioch Middle School"][sep],
+            -0.03,
         )
-        # volatile: Riverside swings hard both directions
-        riv = series["Riverside Elementary"]
+        # volatile: North Kansas City High School swings hard both directions
+        riv = series["North Kansas City High School"]
         self.assertGreater(riv[oct_] - riv[sep], 0.04)
         self.assertLess(riv[nov] - riv[oct_], -0.04)
 
