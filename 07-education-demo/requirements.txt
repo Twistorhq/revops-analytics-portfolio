@@ -4,3 +4,8 @@
 # CalibratedClassifierCV, train_test_split, StandardScaler, roc_auc_score,
 # brier_score_loss, precision_recall_curve) are stable since 1.1.
 scikit-learn>=1.1
+# TW-495: lifelines (BSD-3-Clause, FOSS-clean) for the Cox proportional-
+# hazards survival overlay. Tested on 0.30.3. APIs used: CoxPHFitter
+# (fit/predict_survival_function/predict_partial_hazard/concordance_index_),
+# KaplanMeierFitter, proportional_hazard_test.
+lifelines>=0.27
