@@ -2,3 +2,5 @@ __pycache__/
 .ipynb_checkpoints/
 *.pyc
 .DS_Store
+# Generated demo dashboard (07-education-demo/dashboard.py __main__)
+attendance-dashboard.html
