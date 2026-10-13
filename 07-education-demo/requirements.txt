@@ -1,0 +1,6 @@
+# Prepared by Twistor Holdings LLC
+# TW-494: dependencies for the chronic-absenteeism prediction overlay.
+# Tested on scikit-learn 1.9.1. The APIs used (LogisticRegression,
+# CalibratedClassifierCV, train_test_split, StandardScaler, roc_auc_score,
+# brier_score_loss, precision_recall_curve) are stable since 1.1.
+scikit-learn>=1.1

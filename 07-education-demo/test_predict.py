@@ -54,7 +54,11 @@ def test_features_have_expected_shape():
         assert 0.0 <= r["first30_rate"] <= 1.0
         assert r["max_streak"] >= 0
         assert r["chronic_next"] in (0, 1)
-        assert not r["student"].startswith("synth-") or True  # IDs stay internal
+        assert set(r) == set(features) | {
+            "school",
+            "student",
+            "chronic_next",
+        }  # no stray fields
 
 
 def test_first30_rate_computed_correctly():
@@ -189,3 +193,70 @@ def test_no_student_ids_in_model_artifacts():
     _, _, rel, odds, _ = run_backtest(rows, features)
     blob = str(rel) + str(odds)
     assert "synth-" not in blob
+
+
+def _mini_history_with_gap(unenrolled_period):
+    """Hand-built history: 30 enrolled Sep days + one unenrolled day in the
+    requested period + a 15-day November forecast window."""
+    import datetime as dt
+
+    recs = []
+    d = dt.date(2026, 9, 1)
+    made = 0
+    while made < 30:
+        if d.weekday() < 5:
+            recs.append(
+                {
+                    "school": "S",
+                    "student": "synth-s-0001",
+                    "date": d.isoformat(),
+                    "period": "2026-09",
+                    "enrolled": 1,
+                    "present": 1,
+                }
+            )
+            made += 1
+        d += dt.timedelta(days=1)
+    ud = (
+        dt.date(2026, 10, 5) if unenrolled_period == "2026-10" else dt.date(2026, 11, 9)
+    )
+    recs.append(
+        {
+            "school": "S",
+            "student": "synth-s-0001",
+            "date": ud.isoformat(),
+            "period": unenrolled_period,
+            "enrolled": 0,
+            "present": 0,
+        }
+    )
+    d = dt.date(2026, 11, 2)
+    made = 0
+    while made < 15:
+        if d.weekday() < 5:
+            recs.append(
+                {
+                    "school": "S",
+                    "student": "synth-s-0001",
+                    "date": d.isoformat(),
+                    "period": "2026-11",
+                    "enrolled": 1,
+                    "present": 1,
+                }
+            )
+            made += 1
+        d += dt.timedelta(days=1)
+    return recs
+
+
+def test_churn_flag_uses_observation_window_only():
+    # Unenrolled day in October (observation window) -> flag set.
+    rows, _ = build_features(_mini_history_with_gap("2026-10"))
+    assert len(rows) == 1
+    assert rows[0]["churn_flag"] == 1
+    # Unenrolled day in November (forecast window) -> flag NOT set.
+    # At prediction time (end of October) November enrollment is unknowable;
+    # a feature reading it would be label leakage.
+    rows, _ = build_features(_mini_history_with_gap("2026-11"))
+    assert len(rows) == 1
+    assert rows[0]["churn_flag"] == 0

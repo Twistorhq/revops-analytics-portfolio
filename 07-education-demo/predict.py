@@ -115,8 +115,9 @@ def build_features(records):
       first30_rate  present/enrolled over first 30 enrolled days
       monfri_lift   (Mon+Fri absence rate) - (Tue-Thu absence rate), in points
       max_streak    longest consecutive-absence run in the window
+      trend         Oct attendance rate - Sep attendance rate (negative = declining)
       school_base   school mean absence rate over the window
-      churn_flag    1 if the student missed any enrolled day entirely
+      churn_flag    1 if the student missed any enrolled day entirely in the window
     Target:
       chronic_next  1 if absent 10%+ of enrolled days in the forecast period
     Returns (rows, feature_names). Rows are dicts with 'school','student'.
@@ -141,6 +142,10 @@ def build_features(records):
     for student, recs in sorted(by_student.items()):
         school = recs[0]["school"]
         obs = [r for r in recs if r["period"] in OBSERVE_PERIODS and r["enrolled"]]
+        # TW-494 fix: churn must be measured from the observation window only.
+        # recs spans the forecast period too, which is unknowable at prediction
+        # time. obs_any keeps unenrolled days inside Sep-Oct for the flag.
+        obs_any = [r for r in recs if r["period"] in OBSERVE_PERIODS]
         fc = [r for r in recs if r["period"] == FORECAST_PERIOD and r["enrolled"]]
         if len(obs) < 20 or not fc:
             continue  # insufficient history or no forecast window: skip
@@ -158,7 +163,7 @@ def build_features(records):
         oct_rate = sum(r["present"] for r in oct_) / len(oct_) if oct_ else first30_rate
         trend = oct_rate - sep_rate  # negative = declining attendance
         school_base = school_absent[school] / school_enrolled[school]
-        churn_flag = 1 if any(r["enrolled"] == 0 for r in recs) else 0
+        churn_flag = 1 if any(r["enrolled"] == 0 for r in obs_any) else 0
         fc_absent_rate = sum(1 for r in fc if not r["present"]) / len(fc)
         rows.append(
             {

@@ -5,7 +5,7 @@
 Ticket TW-494 (Justynn, 2026-10-13): ML overlay predicting chronic absenteeism
 before it happens, from Twistor's own modeling experience. Branch
 `maya/tw-494-predict`, `07-education-demo/predict.py` (data + features),
-`model.py` (training/calibration/backtest), `test_predict.py` (10 tests).
+`model.py` (training/calibration/backtest), `test_predict.py` (11 tests).
 
 ## Task report
 - Built a deterministic day-level synthetic generator (student x weekday,
@@ -15,8 +15,8 @@ before it happens, from Twistor's own modeling experience. Branch
   chronic status (>=10% absent) in November. 3,226 students, 42.8% base rate.
 - Backtest (train Sep-Oct features -> predict Nov; stratified 75/25 split;
   isotonic calibration on held-out fold):
-  - `python3 -m pytest test_predict.py` -> **10/10 pass**; full suite
-    **44/44 + 5 subtests pass**; `ruff check` + `ruff format --check` clean.
+  - `python3 -m pytest test_predict.py` -> **11/11 pass**; full suite
+    **45/45 + 5 subtests pass**; `ruff check` + `ruff format --check` clean.
 - Model vs naive baseline (flag if first-30-day rate < 90%), same test set:
   - Baseline: precision 0.6935, recall 0.5246
   - Model @0.5: precision 0.6688, recall 0.5971, AUC 0.7645, Brier 0.1943
@@ -27,7 +27,7 @@ before it happens, from Twistor's own modeling experience. Branch
 ## Guarantees
 | # | What is guaranteed | Test file or command | Type | Result | Evidence |
 |---|---|---|---|---|---|
-| 1 | Instructional days are weekdays in Sep-Nov 2026 | test_predict.py::test_instructional_days_are_weekdays | unit | PASS | 10/10 green |
+| 1 | Instructional days are weekdays in Sep-Nov 2026 | test_predict.py::test_instructional_days_are_weekdays | unit | PASS | 11/11 green |
 | 2 | Generation deterministic; seed changes output | test_predict.py::test_generation_is_deterministic | unit | PASS | byte-identical reruns |
 | 3 | first30_rate / max_streak compute correctly | test_first30_rate_computed_correctly, test_streak_counts_consecutive_absences | unit | PASS | hand-built histories |
 | 4 | Model beats baseline at matched recall; AUC > 0.70 | test_model_beats_baseline_at_matched_recall | RED/backtest | PASS | 0.7126 vs 0.6935 |
@@ -35,7 +35,8 @@ before it happens, from Twistor's own modeling experience. Branch
 | 6 | Calibration gap < 0.10 across bins | test_reliability_curve_is_roughly_diagonal | calibration | PASS | curve shown below |
 | 7 | Fallback == naive rule | test_fallback_matches_naive_rule | unit | PASS | rollback safe |
 | 8 | No student IDs in model artifacts | test_no_student_ids_in_model_artifacts | security | PASS | 0 synth- strings |
-| 9 | Full suite green, ruff clean | `pytest .`, `ruff check`, `ruff format --check` | CI | PASS | 44 passed |
+| 9 | Full suite green, ruff clean | `pytest .`, `ruff check`, `ruff format --check` | CI | PASS | 45 passed |
+| 10 | churn_flag uses observation window only (no label leakage) | test_predict.py::test_churn_flag_uses_observation_window_only | unit | PASS | hand-built histories |
 
 ## Reliability curve (predicted vs observed, test set)
 | bin | n | mean predicted | observed rate |
@@ -66,7 +67,8 @@ before it happens, from Twistor's own modeling experience. Branch
 - Backtest is one temporal split (Sep-Oct -> Nov); no multi-year validation.
 - Small-n schools (Summit, n=14) have noisy estimates — flagged, not fixed.
 - No fairness audit across subgroups (synthetic data has no subgroups).
-- sklearn added as a dev/test dependency; production inference needs it too.
+- scikit-learn declared in `07-education-demo/requirements.txt` (tested on
+  1.9.1); production inference needs it too.
 
 ## Plan-safety notes
 No embedded instructions or suspicious content encountered. Scope respected:
@@ -90,7 +92,7 @@ watch 0.35-0.6, on-track < 0.35).
 | max_streak | int >= 0 | longest consecutive-absence run, obs window | 0 if none |
 | trend | float | Oct attendance rate - Sep attendance rate | 0.0 if either month missing |
 | school_base | float [0,1] | school mean absence rate, obs window | district mean if school unseen |
-| churn_flag | 0/1 | any unenrolled day in history | 0 |
+| churn_flag | 0/1 | any unenrolled day in the observation window | 0 |
 | chronic_next | 0/1 | absent >= 10% of enrolled days, forecast period | rows without forecast dropped |
 
 ## 3. Assumptions
@@ -127,8 +129,13 @@ every retrain; if the model ever loses, it doesn't ship.
   district mean (not yet implemented; flagged).
 - **Regime change:** the model cannot predict what it has never seen
   (e.g., a school closure). Counselor judgment overrides the score.
-- **Label leakage risk:** school_base must come from the observation
-  window only — never from the forecast period. Enforced in build_features.
+- **Label leakage risk:** every feature must come from the observation
+  window only — never from the forecast period. `churn_flag` was originally
+  computed over all records (including November, which is unknowable at
+  prediction time) — fixed to the Sep-Oct window and guarded by
+  `test_churn_flag_uses_observation_window_only`. `school_base` is computed
+  from observation-window records only. Enforced in `build_features` via
+  `obs`-window filtering.
 - **Synthetic-to-real gap:** real data has messier patterns; expect AUC
   to move on retrain. The methodology transfers, the coefficients don't.
 
