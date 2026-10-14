@@ -18,6 +18,7 @@ leading. No decorative gradients, no emoji-as-UI.
 """
 
 import html
+import json
 
 from attendance import summarize
 from importer import (
@@ -128,6 +129,101 @@ function applyFilters(){
 }
 document.getElementById('f-school').addEventListener('change',applyFilters);
 document.getElementById('f-period').addEventListener('change',applyFilters);
+
+/* TW-516: KPI drill-down — Power-BI-style cross-highlight. A card's drill
+   button opens the panel with that metric's top-school table (pre-escaped
+   server-side in window.KPI_DRILL); picking a school highlights its line
+   in the hero chart and flashes its rows in the school table. */
+(function(){
+  var panel=document.getElementById('drill-panel');
+  if(!panel||!window.KPI_DRILL)return;
+  var reduceMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function scrollToEl(el){
+    el.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:'start'});
+  }
+  function resetChart(){
+    document.querySelectorAll('#hero-chart path.dim,#hero-chart path.hl')
+      .forEach(function(p){p.classList.remove('dim','hl');});
+    document.querySelectorAll('#hero-chart text.dim')
+      .forEach(function(t){t.classList.remove('dim');});
+    document.querySelectorAll('#m tbody tr.flash')
+      .forEach(function(tr){tr.classList.remove('flash');});
+  }
+  function showcase(school){
+    var chart=document.getElementById('hero-chart');
+    if(!chart)return;
+    var paths=chart.querySelectorAll('path[data-school]');
+    var found=false;
+    paths.forEach(function(p){
+      var match=p.getAttribute('data-school')===school;
+      p.classList.toggle('hl',match);
+      p.classList.toggle('dim',!match);
+      if(match)found=true;
+    });
+    chart.querySelectorAll('text.chart-label').forEach(function(t){
+      t.classList.toggle('dim',t.getAttribute('data-school')!==school);
+    });
+    document.querySelectorAll('#m tbody tr').forEach(function(tr){
+      var match=tr.getAttribute('data-school')===school;
+      tr.classList.remove('flash');
+      if(match&&found){void tr.offsetWidth;tr.classList.add('flash');}
+    });
+    scrollToEl(chart);
+  }
+  function openCard(i,btn){
+    var d=window.KPI_DRILL[i];
+    if(!d)return;
+    var isOpen=panel.dataset.card===String(i)&&!panel.hidden;
+    document.querySelectorAll('.drill-btn[data-card]').forEach(function(b){
+      b.setAttribute('aria-expanded','false');
+    });
+    resetChart();
+    if(isOpen){panel.hidden=true;panel.dataset.card='';return;}
+    btn.setAttribute('aria-expanded','true');
+    panel.dataset.card=String(i);
+    var h='<h3>Behind the number: '+d.name+'</h3>'
+      +'<p class="note">The top schools driving this metric. Pick a school '
+      +'to see its line in the trend chart and its rows in the school table.</p>'
+      +'<div class="table-scroll"><table class="mini"><thead><tr>'
+      +d.headers.map(function(x){return '<th scope="col">'+x+'</th>';}).join('')
+      +'</tr></thead><tbody>'
+      +d.rows.map(function(r){
+          var cells=r.map(function(c,idx){
+            if(idx===0){
+              return '<td><button class="school-btn" data-school="'+c+'">'
+                +c+'</button></td>';
+            }
+            return '<td class="num">'+c+'</td>';
+          }).join('');
+          return '<tr>'+cells+'</tr>';
+        }).join('')
+      +'</tbody></table></div>'
+      +'<p class="drill-actions"><button class="drill-btn" id="drill-reset">'
+      +'Show all schools</button>'
+      +'<a class="drill-link" href="#schools-section">Jump to the full '
+      +'school table</a></p>';
+    panel.innerHTML=h;
+    panel.hidden=false;
+    panel.querySelectorAll('.school-btn').forEach(function(b){
+      b.addEventListener('click',function(){showcase(b.getAttribute('data-school'));});
+    });
+    panel.querySelector('#drill-reset').addEventListener('click',resetChart);
+    scrollToEl(panel);
+  }
+  document.querySelectorAll('.drill-btn[data-card]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      openCard(parseInt(btn.getAttribute('data-card'),10),btn);
+    });
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'&&!panel.hidden){
+      panel.hidden=true;panel.dataset.card='';resetChart();
+      document.querySelectorAll('.drill-btn[data-card]').forEach(function(b){
+        b.setAttribute('aria-expanded','false');
+      });
+    }
+  });
+})();
 """
 
 
@@ -175,6 +271,31 @@ def _points(delta):
     return f'<span class="{cls}">{sign}{delta * 100:.1f} pts</span>'
 
 
+def _place_labels(items, min_gap, top, bottom):
+    """Greedy vertical de-overlap for end-of-line labels.
+
+    items: [(key, desired_y)]. Sort by desired y, push down to enforce
+    min_gap, then pull the stack back up if it overflows the bottom edge.
+    Returns [(key, placed_y)] — no two labels closer than min_gap.
+    """
+    ordered = sorted(items, key=lambda t: t[1])
+    ys = [t[1] for t in ordered]
+    for i in range(1, len(ys)):
+        if ys[i] < ys[i - 1] + min_gap:
+            ys[i] = ys[i - 1] + min_gap
+    if ys and ys[-1] > bottom:
+        ys[-1] = bottom
+        for i in range(len(ys) - 2, -1, -1):
+            if ys[i] > ys[i + 1] - min_gap:
+                ys[i] = ys[i + 1] - min_gap
+            else:
+                break
+    if ys and ys[0] < top:
+        shift = top - ys[0]
+        ys = [y + shift for y in ys]
+    return [(ordered[i][0], ys[i]) for i in range(len(ordered))]
+
+
 def _trend_svg(school_series, district_series, periods, w=660, h=280):
     """Hand-built SVG line chart: attendance rate by period.
 
@@ -183,7 +304,7 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
     w/h set the canvas size; the hero uses a larger canvas.
     """
     W, H = w, h
-    pad_l, pad_r, pad_t, pad_b = 46, 90, 14, 30
+    pad_l, pad_r, pad_t, pad_b = 46, 128, 14, 30
     iw, ih = W - pad_l - pad_r, H - pad_t - pad_b
 
     rates = [r for s in school_series.values() for r in s.values() if r is not None]
@@ -246,7 +367,8 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
         for run_pts in runs:
             d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in run_pts)
             parts.append(
-                f'<path d="{d}" fill="none" stroke="#d8d3c6" stroke-width="1.1"/>'
+                f'<path d="{d}" fill="none" stroke="#d8d3c6" stroke-width="1.1" '
+                f'data-school="{html.escape(school)}"/>'
             )
     dpts = [
         (x(i), y(r))
@@ -257,46 +379,57 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
         d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in dpts)
         parts.append(
             f'<path d="{d}" fill="none" stroke="#0f766e" '
-            f'stroke-width="3" stroke-linejoin="round"/>'
+            f'stroke-width="3" stroke-linejoin="round" data-school="__district__"/>'
         )
         for a, b in dpts:
             parts.append(f'<circle cx="{a:.1f}" cy="{b:.1f}" r="3.6" fill="#0f766e"/>')
-    for j, school in enumerate(_labeled_schools(school_series, periods)):
+    # TW-516: every school gets a bold end-of-line label — no more anonymous
+    # middle, no more colliding pairs. Greedy de-overlap guarantees no two
+    # labels sit closer than 17px; displaced labels get a leader line back
+    # to their line. Labels are bold ink with a white halo (paint-order)
+    # so they read over the lines at any size.
+    label_items = []  # (key, line_y, text, css_class, anchor_x)
+    for school in sorted(school_series):
         vals = [(p, r) for p, r in school_series[school].items() if r is not None]
         if not vals:
             continue
         p, r = vals[-1]
         i = periods.index(p)
-        # Stagger alternate labels so neighboring lines don't collide.
-        dy = 4 if j % 2 == 0 else -10
+        label_items.append(
+            (school, y(r), _short_name(school), "chart-label", x(i))
+        )
+    if dpts:
+        label_items.append(
+            (
+                "__district__",
+                dpts[-1][1],
+                "District avg",
+                "chart-label chart-label-district",
+                dpts[-1][0],
+            )
+        )
+    label_x = W - pad_r + 10
+    placed = _place_labels(
+        [(k, ly) for k, ly, _, _, _ in label_items],
+        min_gap=17,
+        top=pad_t + 8,
+        bottom=pad_t + ih - 8,
+    )
+    placed_y = dict(placed)
+    for key, line_y, text, cls, ax in label_items:
+        py = placed_y[key]
+        if abs(py - line_y) > 6:
+            parts.append(
+                f'<line x1="{ax + 4:.1f}" y1="{line_y:.1f}" '
+                f'x2="{label_x - 6:.1f}" y2="{py:.1f}" '
+                f'stroke="#c9c4b6" stroke-width="1"/>'
+            )
         parts.append(
-            f'<text x="{x(i) + 8:.1f}" y="{y(r) + dy:.1f}" font-size="11.5" '
-            f'fill="#5d6470">{html.escape(_short_name(school))}</text>'
+            f'<text x="{label_x:.1f}" y="{py + 4:.1f}" class="{cls}" '
+            f'data-school="{html.escape(key)}">{html.escape(text)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
-
-
-def _labeled_schools(school_series, periods):
-    """Top-2 and bottom-2 schools by latest available period — the four
-    lines that define the chart's spread. TW-492: with real variation in
-    the data, four labels read the story; two left the middle anonymous."""
-    latest = {}
-    for s, d in school_series.items():
-        for p in reversed(periods):
-            if d.get(p) is not None:
-                latest[s] = d[p]
-                break
-    if not latest:
-        return []
-    ranked = sorted(latest, key=latest.get)
-    picks = []
-    for s in (ranked[-1], ranked[-2], ranked[0], ranked[1]):
-        if s not in picks:
-            picks.append(s)
-        if len(picks) == 4:
-            break
-    return picks
 
 
 def _performance_rows(by_key, per_period, schools, periods):
@@ -634,7 +767,8 @@ details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70
 .kpi-card h3{font-size:17px;margin:0 0 10px;letter-spacing:-.005em}
 .kpi-card .card-big{font-size:46px;font-weight:750;letter-spacing:-.02em;
   line-height:1;margin:0 0 4px;font-variant-numeric:tabular-nums}
-.kpi-card .card-big small{font-size:14px;font-weight:600;color:var(--muted)}
+.kpi-card .card-big small{font-size:14px;font-weight:600;color:var(--muted);
+  display:block;margin-top:6px;line-height:1.35}
 .kpi-card .card-callout{font-size:14px;margin:12px 0 0;padding:10px 12px;
   border-radius:6px;background:var(--callout-bg,#e6f2f0);color:#3a3f47}
 .kpi-card .card-callout.sev-high{--callout-bg:#fdeeee}
@@ -646,6 +780,58 @@ details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70
 /* Wide data tables scroll inside their own region on narrow screens; the
    page itself never scrolls sideways. */
 .table-scroll{overflow-x:auto}
+
+/* TW-516 polish: headers read as headers. Real hierarchy — h1 > h2 > h3 —
+   with size, weight, and breathing room. Nothing floats as random text. */
+section.block h2{font-size:24px;font-weight:750;letter-spacing:-.015em;
+  margin:0 0 10px}
+.hero-h{font-size:24px;font-weight:750;letter-spacing:-.015em;margin:0 0 10px}
+.strip-h{font-size:13px;font-weight:800;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.kpi-card h3{font-size:18px}
+.model h3{font-size:18px}
+
+/* TW-516: chart school labels — bold, ink-dark, haloed so they read over
+   the lines. Never decorative: the halo is legibility, not glow. */
+.chart-label{font-size:12px;font-weight:700;fill:#3a3f47;
+  paint-order:stroke;stroke:#ffffff;stroke-width:3px;stroke-linejoin:round}
+.chart-label-district{fill:#0f766e}
+
+/* TW-516: KPI drill-down (Power-BI-style cross-highlight). Functional
+   motion only — dim/highlight draws the eye to the exact data points. */
+#hero-chart path{transition:opacity .25s ease}
+#hero-chart path.dim{opacity:.1}
+#hero-chart path.hl{stroke:#0f766e;stroke-width:2.8;opacity:1}
+#hero-chart text.dim{opacity:.2}
+@media (prefers-reduced-motion:reduce){
+  #hero-chart path{transition:none}
+  html{scroll-behavior:auto}
+}
+@keyframes rowflash{0%{background-color:#fff3d6}100%{background-color:transparent}}
+#m tbody tr.flash{animation:rowflash 2.4s ease-out}
+@media (prefers-reduced-motion:reduce){
+  #m tbody tr.flash{animation:none;background-color:#fff3d6}
+}
+.drill-btn{margin-top:14px;background:none;border:1px solid var(--hairline);
+  border-radius:6px;padding:8px 14px;font-size:13.5px;font-weight:700;
+  color:var(--accent-deep);cursor:pointer;font-family:inherit}
+.drill-btn:hover{border-color:var(--accent-deep);background:#f2faf9}
+.drill-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.drill-btn[aria-expanded="true"]{background:var(--accent-deep);color:#fff;
+  border-color:var(--accent-deep)}
+.drill{margin-top:20px;background:var(--surface);border:1px solid var(--hairline);
+  border-radius:10px;padding:22px 24px}
+.drill h3{font-size:18px;font-weight:750;letter-spacing:-.01em;margin:0 0 4px}
+.drill .note{color:var(--muted);font-size:13.5px;margin:0 0 6px;max-width:72ch}
+.drill table{margin-top:12px}
+.drill-actions{margin:16px 0 0;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.drill-actions .drill-btn{margin-top:0}
+.drill-link{font-size:13.5px;font-weight:600;color:var(--accent-deep)}
+.school-btn{background:none;border:0;padding:0;font:inherit;font-size:14px;
+  font-weight:700;color:var(--accent-deep);cursor:pointer;text-align:left}
+.school-btn:hover{text-decoration:underline}
+.school-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none !important}
 """
 
 # Survival-model overlay values. lifelines is not available in every render
@@ -684,7 +870,7 @@ def _trend_strip_html(callouts):
     items = [c for c in callouts if c.get("template_id") in _TREND_TEMPLATES]
     if not items:
         return ""
-    parts = ['<div class="trend-strip"><div class="eyebrow">What changed</div>']
+    parts = ['<div class="trend-strip"><h3 class="strip-h">What changed</h3>']
     for c in items:
         parts.append(
             f'<div class="trend-item {c.get("sev", "sev-info")}">'
@@ -709,7 +895,13 @@ def _kpi_cards_html(blocks, callouts):
     plain-language name, the number, its dynamic callouts (severity-tinted),
     severity color, and the formula one click away. Metric-specific
     callouts are matched by template_id; trend callouts stay with the hero
-    chart."""
+    chart.
+
+    TW-516: each card carries a drill button (Power-BI-style). Clicking it
+    opens the drill panel under the grid with the metric's top-school table;
+    picking a school cross-highlights its line in the hero chart and its
+    rows in the school table. The drill blob is pre-escaped server-side —
+    the client inserts it verbatim."""
     by_card = {}
     for c in callouts:
         idx = _CARD_FOR_TEMPLATE.get(c.get("template_id"))
@@ -720,7 +912,9 @@ def _kpi_cards_html(blocks, callouts):
     cards.append(
         '<p class="note">Five numbers that tell you what to do Monday '
         "morning. The math behind each one is a single click away &mdash; "
-        "open &ldquo;How this is calculated&rdquo; on any card.</p>"
+        "open &ldquo;How this is calculated&rdquo; on any card. "
+        "Open &ldquo;See the schools behind this&rdquo; on any card to "
+        "trace the number back to its schools.</p>"
         '<div class="kpi-grid">'
     )
     for i, b in enumerate(blocks):
@@ -741,9 +935,27 @@ def _kpi_cards_html(blocks, callouts):
             '<details class="calc"><summary>How this is calculated</summary>'
             f'<span class="formula">{html.escape(b["formula"])}</span>'
             "</details>"
+            f'<button class="drill-btn" data-card="{i}" aria-expanded="false" '
+            'aria-controls="drill-panel">See the schools behind this '
+            '<span aria-hidden="true">&rarr;</span></button>'
             "</div>"
         )
-    cards.append("</div></section>")
+    cards.append("</div>")
+    cards.append('<div id="drill-panel" class="drill" hidden></div>')
+    drill = []
+    for b in blocks:
+        rows = [list(r) for r in b.get("table_rows", [])]
+        drill.append(
+            {
+                "name": html.escape(b["name"]),
+                "headers": [html.escape(h) for h in b.get("table_headers", [])],
+                "rows": rows,
+                "schools": [r[0] for r in rows if r],
+            }
+        )
+    blob = json.dumps(drill).replace("</", "<\\/")
+    cards.append(f"<script>window.KPI_DRILL={blob};</script>")
+    cards.append("</section>")
     return "".join(cards)
 
 
@@ -1244,8 +1456,9 @@ daily attendance grain</p>
 </header>
 <section class="hero" aria-label="Attendance trend">
 <div class="eyebrow">The trend, first</div>
+<h2 class="hero-h">Where the district stands</h2>
 {hero_rate_line}
-<div class="chart chart-hero">{chart_html}</div>
+<div class="chart chart-hero" id="hero-chart">{chart_html}</div>
 <p class="chart-cap">Bold teal line: district weighted average.
 Gray lines: individual schools. Breaks mark periods with no reported data
 &mdash; never interpolated.</p>
@@ -1253,7 +1466,7 @@ Gray lines: individual schools. Breaks mark periods with no reported data
 </section>
 {_kpi_cards_html(metrics_data["blocks"], callouts)}
 {_model_overlays_html(logistic_data, SURVIVAL_OVERLAY)}
-<section class="block">
+<section class="block" id="schools-section">
 <h2>Every school, every period</h2>
 <p class="note">One row per school per reporting period. &ldquo;Vs district&rdquo;
 compares the school&rsquo;s period rate to the district weighted rate for the

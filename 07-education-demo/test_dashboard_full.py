@@ -12,10 +12,12 @@ from dashboard import (
     _fmt_period,
     _kpi_cards_html,
     _model_overlays_html,
+    _place_labels,
     _plain_kicker,
     _sev_class,
     _short_name,
     _trend_strip_html,
+    _trend_svg,
     render_full,
 )
 
@@ -423,6 +425,242 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(_fmt_period("2026-09"), "Sep 2026")
         self.assertEqual(_fmt_period("2026-11"), "Nov 2026")
         self.assertEqual(_fmt_period("weird"), "weird")
+
+
+TWELVE_SCHOOLS = [
+    "Staley High School",
+    "Oak Park High School",
+    "Winnetonka High School",
+    "North Kansas City High School",
+    "Antioch Middle School",
+    "New Mark Middle School",
+    "Maple Park Middle School",
+    "Northgate Middle School",
+    "Bell Prairie Elementary",
+    "Briarcliff Elementary",
+    "Chapel Hill Elementary",
+    "Golden Oaks Education Center",
+]
+
+
+def _colliding_series():
+    """12 schools x 3 periods with final rates clustered to force label
+    collisions — the de-overlap pass must still separate every label."""
+    periods = ["2026-09", "2026-10", "2026-11"]
+    finals = [
+        0.970, 0.969, 0.968, 0.930, 0.800, 0.910,
+        0.905, 0.940, 0.972, 0.971, 0.900, 0.790,
+    ]
+    series = {
+        s: {p: (0.95 if i < 2 else f) for i, p in enumerate(periods)}
+        for s, f in zip(TWELVE_SCHOOLS, finals)
+    }
+    return series, {p: 0.915 for p in periods}, periods
+
+
+_LABEL_RE = None
+
+
+def _chart_labels(svg):
+    import re
+
+    return re.findall(
+        r'<text x="([\d.]+)" y="([\d.]+)" class="([^"]+)" '
+        r'data-school="([^"]+)">([^<]+)</text>',
+        svg,
+    )
+
+
+class ChartLabelTests(unittest.TestCase):
+    def test_all_twelve_schools_labeled(self):
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        labels = _chart_labels(svg)
+        schools_labeled = {ds for _, _, _, ds, _ in labels} - {"__district__"}
+        self.assertEqual(schools_labeled, set(TWELVE_SCHOOLS))
+
+    def test_labels_are_bold_and_dark(self):
+        # Justynn: school names must read as highlighted, not gray whispers.
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        labels = _chart_labels(svg)
+        self.assertTrue(labels)
+        for _, _, cls, _, _ in labels:
+            self.assertIn("chart-label", cls)
+        import dashboard
+
+        css = dashboard.PAGE_CSS + dashboard.PAGE_CSS_EXTRA
+        self.assertIn("font-weight:700", css.split(".chart-label{")[1].split("}")[0])
+
+    def test_no_label_collisions(self):
+        # the v7 bug: two labels 1px apart. Minimum 17px enforced now.
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        ys = sorted(float(y) for _, y, _, _, _ in _chart_labels(svg))
+        gaps = [b - a for a, b in zip(ys, ys[1:])]
+        self.assertTrue(gaps)
+        self.assertGreaterEqual(min(gaps), 16.9)
+
+    def test_district_label_present(self):
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        labels = _chart_labels(svg)
+        dist = [t for _, _, _, ds, t in labels if ds == "__district__"]
+        self.assertEqual(dist, ["District avg"])
+
+    def test_paths_carry_data_school(self):
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        for s in TWELVE_SCHOOLS:
+            self.assertIn(f'data-school="{s}"', svg)
+        self.assertIn('data-school="__district__"', svg)
+
+    def test_place_labels_unit(self):
+        placed = _place_labels(
+            [("a", 100.0), ("b", 101.0), ("c", 102.0)],
+            min_gap=17,
+            top=0,
+            bottom=500,
+        )
+        ys = [y for _, y in placed]
+        self.assertEqual([k for k, _ in placed], ["a", "b", "c"])
+        self.assertGreaterEqual(ys[1] - ys[0], 17)
+        self.assertGreaterEqual(ys[2] - ys[1], 17)
+
+    def test_displaced_labels_get_leader_lines(self):
+        series, district, periods = _colliding_series()
+        svg = _trend_svg(series, district, periods, w=900, h=380)
+        # clustered finals force displacement -> leader lines appear
+        self.assertIn('stroke="#c9c4b6"', svg)
+
+
+class DrillDownTests(unittest.TestCase):
+    def test_cards_have_drill_buttons(self):
+        page = _kpi_cards_html(METRICS_DATA["blocks"], [])
+        for i in range(len(METRICS_DATA["blocks"])):
+            self.assertIn(f'data-card="{i}"', page)
+        self.assertIn('aria-controls="drill-panel"', page)
+        self.assertIn("See the schools behind this", page)
+        self.assertIn('id="drill-panel"', page)
+
+    def test_drill_blob_has_five_entries(self):
+        import json
+        import re
+
+        blocks = list(METRICS_DATA["blocks"]) * 5
+        page = _kpi_cards_html(blocks, [])
+        m = re.search(r"window\.KPI_DRILL=(\[.*?\]);</script>", page)
+        self.assertIsNotNone(m)
+        blob = json.loads(m.group(1))
+        self.assertEqual(len(blob), 5)
+        for entry in blob:
+            self.assertIn("name", entry)
+            self.assertIn("headers", entry)
+            self.assertIn("rows", entry)
+            self.assertIn("schools", entry)
+            self.assertTrue(entry["schools"])
+
+    def test_drill_blob_schools_match_table_rows(self):
+        # the blob's school keys must equal the table's data-school values
+        import json
+        import re
+
+        dashboard.summarize = _summarize
+        try:
+            page = render_full(
+                _rows(),
+                district="NKC-DEMO",
+                allowed_schools=frozenset(
+                    {"Antioch Middle School", "Staley High School"}
+                ),
+                callouts=CALLOUTS,
+                metrics_data=METRICS_DATA,
+                logistic_data=LOGISTIC,
+                title="Full demo",
+            )
+        finally:
+            dashboard.summarize = _REAL_SUMMARIZE
+        m = re.search(r"window\.KPI_DRILL=(\[.*?\]);</script>", page)
+        blob = json.loads(m.group(1))
+        blob_schools = {s for e in blob for s in e["schools"]}
+        for s in blob_schools:
+            self.assertIn(f'data-school="{s}"', page)
+
+    def test_hero_chart_and_table_are_drill_targets(self):
+        dashboard.summarize = _summarize
+        try:
+            page = render_full(
+                _rows(),
+                district="NKC-DEMO",
+                allowed_schools=frozenset(
+                    {"Antioch Middle School", "Staley High School"}
+                ),
+                callouts=CALLOUTS,
+                metrics_data=METRICS_DATA,
+                logistic_data=LOGISTIC,
+                title="Full demo",
+            )
+        finally:
+            dashboard.summarize = _REAL_SUMMARIZE
+        self.assertIn('id="hero-chart"', page)
+        self.assertIn('id="schools-section"', page)
+        self.assertIn("function showcase(school)", page)
+        self.assertIn("scrollIntoView", page)
+
+
+class HeaderTests(unittest.TestCase):
+    def _page(self):
+        dashboard.summarize = _summarize
+        try:
+            return render_full(
+                _rows(),
+                district="NKC-DEMO",
+                allowed_schools=frozenset(
+                    {"Antioch Middle School", "Staley High School"}
+                ),
+                callouts=CALLOUTS,
+                metrics_data=METRICS_DATA,
+                logistic_data=LOGISTIC,
+                title="Full demo",
+            )
+        finally:
+            dashboard.summarize = _REAL_SUMMARIZE
+
+    def test_hero_has_real_h2(self):
+        self.assertIn('<h2 class="hero-h">', self._page())
+
+    def test_trend_strip_heading_is_h3(self):
+        mv = {
+            "template_id": "movement",
+            "kicker": "Antioch &mdash; slipping",
+            "big_html": "-7.0 pts",
+            "line_html": "slipped.",
+            "sev": "sev-high",
+        }
+        page = _trend_strip_html([mv])
+        self.assertIn('<h3 class="strip-h">What changed</h3>', page)
+
+    def test_heading_outline_has_no_skips(self):
+        import re
+
+        page = self._page()
+        levels = [int(m.group(1)) for m in re.finditer(r"<h([123])[\s>]", page)]
+        self.assertTrue(levels)
+        self.assertEqual(levels[0], 1)
+        for a, b in zip(levels, levels[1:]):
+            self.assertLessEqual(b - a, 1, f"heading skip: h{a} -> h{b}")
+
+    def test_h2_sized_like_a_header(self):
+        import dashboard
+        import re
+
+        css = dashboard.PAGE_CSS + dashboard.PAGE_CSS_EXTRA
+        # the EXTRA sheet overrides the old 19px section h2 with 24px/750
+        m = re.findall(r"section\.block h2\{([^}]*)\}", css)
+        self.assertTrue(m)
+        last = m[-1]
+        self.assertIn("font-size:24px", last)
+        self.assertIn("font-weight:750", last)
 
 
 if __name__ == "__main__":
