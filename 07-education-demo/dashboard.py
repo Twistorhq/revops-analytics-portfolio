@@ -5,10 +5,16 @@ Stdlib only, no external assets — works offline. Aggregate only: no
 student-level data ever reaches the page. Synthetic data is labeled on
 every render.
 
-Design brief: read like a serious internal analytics tool built by a
-senior data engineer. Every number labeled, every chart honest, the
-math documented on the page. No decorative gradients, no emoji-as-UI,
-no card-grid slop.
+Design brief (TW-501 redesign, card layout): content-first and colorful
+for a non-technical audience. The trend chart is the hero — large and
+prominent at the top. Below it, the five custom metrics live in KPI
+cards (wrapping grid, still one vertical stream): plain-language name,
+the number, its dynamic callouts, severity color, and the formula one
+click away in a "How this is calculated" dropdown. A superintendent
+should gain value instantly: plain-language headings, a severity color
+language (red/amber/green) that answers "is this good or bad?" before
+any number is read. The math stays in the product, it just stops
+leading. No decorative gradients, no emoji-as-UI.
 """
 
 import html
@@ -32,13 +38,15 @@ PAGE_CSS = """
 body{margin:0;background:var(--paper);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
-.utility{background:#16181d;color:#f3efe6;font-size:12.5px;letter-spacing:.02em;
-  padding:8px 24px;text-align:center}
-.utility strong{font-weight:700;letter-spacing:.08em}
+.utility{background:#23262c;color:#c9cdd4;font-size:11px;letter-spacing:.06em;
+  padding:6px 24px;text-align:center;text-transform:uppercase}
+.utility strong{font-weight:700}
 .wrap{max-width:1060px;margin:0 auto;padding:0 24px 72px}
-.masthead{padding:36px 0 8px;border-bottom:1px solid var(--hairline)}
-.masthead h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
-.masthead .lede{color:var(--muted);margin:0;font-size:15px}
+.masthead{padding:40px 0 20px;border-bottom:1px solid var(--hairline)}
+.masthead .eyebrow{color:var(--accent-deep);margin-bottom:8px}
+.masthead h1{font-size:34px;line-height:1.15;margin:0 0 8px;letter-spacing:-.02em;
+  font-weight:750}
+.masthead .lede{color:var(--muted);margin:0;font-size:14.5px}
 .hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
   gap:40px;padding:28px 0;border-bottom:1px solid var(--hairline)}
 @media(max-width:720px){.hero{grid-template-columns:1fr}}
@@ -127,6 +135,33 @@ def _pct(x, digits=1):
     return f"{x * 100:.{digits}f}%" if x is not None else "n/a"
 
 
+_MONTHS = {
+    "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun",
+    "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+}
+
+
+def _fmt_period(p):
+    """'2026-09' -> 'Sep 2026'. Falls back to the raw value."""
+    try:
+        y, m = p.split("-")
+        return f"{_MONTHS[m]} {y}"
+    except (ValueError, KeyError):
+        return p
+
+
+def _short_name(school):
+    """Compact school name for chart labels: 'Staley High School' -> 'Staley HS'."""
+    s = school.replace("North Kansas City ", "NKC ")
+    s = s.replace(" High School", " HS").replace(" Middle School", " MS")
+    s = s.replace(" Elementary", "").replace(" Education Center", "")
+    return s
+
+
+def _na(x):
+    return x if x is not None else "n/a"
+
+
 def _points(delta):
     """Format a percentage-point delta: +0.6 pts / -1.2 pts / n/a."""
     if delta is None:
@@ -140,13 +175,14 @@ def _points(delta):
     return f'<span class="{cls}">{sign}{delta * 100:.1f} pts</span>'
 
 
-def _trend_svg(school_series, district_series, periods):
+def _trend_svg(school_series, district_series, periods, w=660, h=280):
     """Hand-built SVG line chart: attendance rate by period.
 
     school_series: {school: {period: rate|None}}. district_series:
     {period: rate|None}. Gaps (None) break the line — never interpolated.
+    w/h set the canvas size; the hero uses a larger canvas.
     """
-    W, H = 660, 280
+    W, H = w, h
     pad_l, pad_r, pad_t, pad_b = 46, 90, 14, 30
     iw, ih = W - pad_l - pad_r, H - pad_t - pad_b
 
@@ -210,7 +246,7 @@ def _trend_svg(school_series, district_series, periods):
         for run_pts in runs:
             d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in run_pts)
             parts.append(
-                f'<path d="{d}" fill="none" stroke="#c9c4b6" stroke-width="1.2"/>'
+                f'<path d="{d}" fill="none" stroke="#d8d3c6" stroke-width="1.1"/>'
             )
     dpts = [
         (x(i), y(r))
@@ -221,7 +257,7 @@ def _trend_svg(school_series, district_series, periods):
         d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in dpts)
         parts.append(
             f'<path d="{d}" fill="none" stroke="#0f766e" '
-            f'stroke-width="2.6" stroke-linejoin="round"/>'
+            f'stroke-width="3" stroke-linejoin="round"/>'
         )
         for a, b in dpts:
             parts.append(f'<circle cx="{a:.1f}" cy="{b:.1f}" r="3.6" fill="#0f766e"/>')
@@ -235,7 +271,7 @@ def _trend_svg(school_series, district_series, periods):
         dy = 4 if j % 2 == 0 else -10
         parts.append(
             f'<text x="{x(i) + 8:.1f}" y="{y(r) + dy:.1f}" font-size="11.5" '
-            f'fill="#5d6470">{html.escape(school)}</text>'
+            f'fill="#5d6470">{html.escape(_short_name(school))}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -263,72 +299,11 @@ def _labeled_schools(school_series, periods):
     return picks
 
 
-def _options(values, element_id, label):
-    opts = [f'<option value="all">All {html.escape(label)}</option>']
-    for v in values:
-        e = html.escape(v)
-        opts.append(f'<option value="{e}">{e}</option>')
-    return (
-        f'<label for="{element_id}"><span>{html.escape(label)}</span>'
-        f'<select id="{element_id}">' + "".join(opts) + "</select></label>"
-    )
-
-
-def render(
-    rows,
-    *,
-    district: str,
-    allowed_schools: frozenset,
-    title: str = "Attendance overview",
-) -> str:
-    """Render the dashboard HTML for a published attendance scope."""
-    summary = summarize(rows, district=district, allowed_schools=allowed_schools)
-    metrics = summary["metrics"]
-    by_key = {(m["school"], m["period"]): m for m in metrics}
-    schools = sorted({m["school"] for m in metrics})
-    periods = sorted({m["period"] for m in metrics})
-
-    # Expected grid: every in-scope school x every period. A missing cell is
-    # a data gap — rendered explicitly, never silently dropped.
-    expected = [(s, p) for s in schools for p in periods]
-
-    # District aggregates per period + overall (weighted; never averaged).
-    per_period = {}
-    for p in periods:
-        pm = [m for m in metrics if m["period"] == p]
-        e = sum(m["enrolled_days"] for m in pm)
-        pr = sum(m["present_days"] for m in pm)
-        per_period[p] = pr / e if e else None
-    total_enrolled = sum(m["enrolled_days"] for m in metrics)
-    total_present = sum(m["present_days"] for m in metrics)
-    overall = (total_present / total_enrolled) if total_enrolled else None
-
-    delta = None
-    if (
-        len(periods) >= 2
-        and per_period[periods[-1]] is not None
-        and per_period[periods[-2]] is not None
-    ):
-        delta = per_period[periods[-1]] - per_period[periods[-2]]
-    delta_html = ""
-    if delta is not None:
-        word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
-        arrow = {"up": "+", "down": "", "flat": "\u00b1"}[word]
-        delta_html = (
-            f'<div class="hero-delta {word}">{arrow}'
-            f"{delta * 100:.1f} pts vs {html.escape(periods[-2])}</div>"
-        )
-
-    school_series = {
-        s: {
-            p: (by_key[(s, p)]["attendance_rate"] if (s, p) in by_key else None)
-            for p in periods
-        }
-        for s in schools
-    }
-
+def _performance_rows(by_key, per_period, schools, periods):
+    """Table rows: one per school per period. Missing cells render as
+    explicit data gaps — never silently dropped."""
     body_rows = []
-    for s, p in expected:
+    for s, p in [(s, p) for s in schools for p in periods]:
         m = by_key.get((s, p))
         if m is None:
             body_rows.append(
@@ -374,6 +349,70 @@ def render(
                 note=note,
             )
         )
+    return body_rows
+
+
+def _options(values, element_id, label):
+    opts = [f'<option value="all">All {html.escape(label)}</option>']
+    for v in values:
+        e = html.escape(v)
+        opts.append(f'<option value="{e}">{e}</option>')
+    return (
+        f'<label for="{element_id}"><span>{html.escape(label)}</span>'
+        f'<select id="{element_id}">' + "".join(opts) + "</select></label>"
+    )
+
+
+def render(
+    rows,
+    *,
+    district: str,
+    allowed_schools: frozenset,
+    title: str = "Attendance overview",
+) -> str:
+    """Render the dashboard HTML for a published attendance scope."""
+    summary = summarize(rows, district=district, allowed_schools=allowed_schools)
+    metrics = summary["metrics"]
+    by_key = {(m["school"], m["period"]): m for m in metrics}
+    schools = sorted({m["school"] for m in metrics})
+    periods = sorted({m["period"] for m in metrics})
+
+    # District aggregates per period + overall (weighted; never averaged).
+    per_period = {}
+    for p in periods:
+        pm = [m for m in metrics if m["period"] == p]
+        e = sum(m["enrolled_days"] for m in pm)
+        pr = sum(m["present_days"] for m in pm)
+        per_period[p] = pr / e if e else None
+    total_enrolled = sum(m["enrolled_days"] for m in metrics)
+    total_present = sum(m["present_days"] for m in metrics)
+    overall = (total_present / total_enrolled) if total_enrolled else None
+
+    delta = None
+    if (
+        len(periods) >= 2
+        and per_period[periods[-1]] is not None
+        and per_period[periods[-2]] is not None
+    ):
+        delta = per_period[periods[-1]] - per_period[periods[-2]]
+    delta_html = ""
+    if delta is not None:
+        word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
+        arrow = {"up": "+", "down": "", "flat": "\u00b1"}[word]
+        delta_html = (
+            f'<div class="hero-delta {word}">{arrow}'
+            f"{delta * 100:.1f} pts vs {html.escape(periods[-2])}</div>"
+        )
+
+    school_series = {
+        s: {
+            p: (by_key[(s, p)]["attendance_rate"] if (s, p) in by_key else None)
+            for p in periods
+        }
+        for s in schools
+    }
+
+    body_rows = _performance_rows(by_key, per_period, schools, periods)
 
     period_label = f"{periods[0]} &ndash; {periods[-1]}" if periods else "no periods"
     chart_html = ""
@@ -478,8 +517,811 @@ def demo() -> str:
     )
 
 
+# ---------------------------------------------------------------------------
+# Presentation dashboard (TW-493 phase 2): larger layout, editorial callouts,
+# the five custom metrics, and the TW-494/495 model overlays.
+
+PAGE_CSS_EXTRA = """
+.wrap{max-width:1180px}
+.hero-num{font-size:84px}
+@media(max-width:720px){.hero-num{font-size:60px}}
+.metric-block{padding:26px 0;border-bottom:1px solid var(--hairline)}
+.metric-block:last-child{border-bottom:0}
+.metric-block h3{font-size:17px;margin:0 0 6px;letter-spacing:-.005em}
+.metric-block h3 .tag{font-size:11.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--accent-deep);display:block;margin-bottom:6px}
+.metric-block .formula{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;background:#efede8;padding:8px 12px;border-radius:6px;
+  color:var(--ink);margin:10px 0;display:inline-block;max-width:100%}
+.metric-block .why{font-size:14px;color:var(--muted);margin:6px 0 14px;max-width:72ch}
+.metric-block .headline{font-size:15px;margin:0 0 12px}
+.metric-block .headline strong{font-variant-numeric:tabular-nums}
+.mini{font-size:13.5px}
+.mini td,.mini th{padding:7px 12px}
+.models{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:760px){.models{grid-template-columns:1fr}}
+.model{background:var(--surface);border:1px solid var(--hairline);
+  border-radius:8px;padding:22px 24px}
+.model h3{font-size:16.5px;margin:0 0 4px}
+.model .sub{font-size:13px;color:var(--muted);margin:0 0 14px}
+.model .statline{display:flex;justify-content:space-between;align-items:baseline;
+  padding:9px 0;border-top:1px solid #f0ede6;font-size:14px}
+.model .statline .n{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.model .tiers{display:flex;gap:0;margin-top:6px;border:1px solid var(--hairline);
+  border-radius:6px;overflow:hidden}
+.model .tier{flex:1;padding:10px 8px;text-align:center;border-right:1px solid var(--hairline)}
+.model .tier:last-child{border-right:0}
+.model .tier .t{font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--muted);margin-bottom:2px}
+.model .tier .c{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums}
+.model .tier.high .c{color:var(--bad)}
+.model .tier.medium .c{color:var(--warn)}
+.model .tier.low .c{color:var(--ok)}
+.model .fine{font-size:12.5px;color:var(--faint);margin:12px 0 0}
+.model code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  background:#efede8;padding:1px 6px;border-radius:4px;color:var(--ink)}
+
+/* Severity color language (TW-501 redesign): color answers "is this good
+   or bad?" before any number is read. Functional, not decorative — the
+   thresholds below mirror the callout engine's. Kept on purpose. */
+.metric-block .tag.sev-high{color:#b91c1c}
+.metric-block .tag.sev-med{color:#b45309}
+.metric-block .tag.sev-good{color:#15803d}
+.metric-block .tag.sev-info{color:#0f766e}
+.metric-block .headline.sev-high strong{color:#b91c1c}
+.metric-block .headline.sev-med strong{color:#b45309}
+.metric-block .headline.sev-good strong{color:#15803d}
+.hero-num.bad{color:#b91c1c}
+.metric-block .plain{font-size:14.5px;color:#3a3f47;margin:6px 0 10px;max-width:72ch}
+
+/* Expandable math: formulas live one click away, never leading. */
+details.calc{margin:14px 0 4px}
+details.calc summary{cursor:pointer;font-size:13.5px;font-weight:600;
+  color:var(--accent-deep);display:inline-block;border-radius:4px}
+details.calc summary:hover{text-decoration:underline}
+details.calc summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+details.calc .formula{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;background:#efede8;padding:8px 12px;border-radius:6px;
+  color:var(--ink);margin:10px 0;display:inline-block;max-width:100%}
+details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70ch}
+
+/* Single vertical stream (layout direction): one column, one direction of
+   travel. Hero stacks; model panels stack; nothing sits side-by-side. */
+.hero{display:block}
+.hero-side{margin-top:20px}
+.hero-rate{font-size:17px;margin:0 0 16px;color:var(--muted)}
+.hero-rate strong{font-size:24px;color:var(--ink);font-variant-numeric:tabular-nums}
+.models{display:block}
+.model{margin-bottom:20px}
+.model:last-child{margin-bottom:0}
+
+/* Hero chart: the centerpiece. Larger canvas, same honest lines. */
+.chart-hero{padding:24px 20px 12px}
+
+/* Trend strip: trend-related callouts (movement, threshold crosses,
+   flatlines) under the hero chart — compact, severity-colored. */
+.trend-strip{margin-top:18px;border-top:1px solid var(--hairline);padding-top:16px}
+.trend-strip .eyebrow{margin-bottom:10px}
+.trend-item{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 0;margin-bottom:6px;border-bottom:1px solid #f0ede6}
+.trend-item:last-child{margin-bottom:0}
+.trend-item.sev-high{--sev:#b91c1c}
+.trend-item.sev-med{--sev:#b45309}
+.trend-item.sev-good{--sev:#15803d}
+.trend-item.sev-info{--sev:#0f766e}
+.trend-item .kicker{font-size:12px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--sev)}
+.trend-item .big{font-size:24px;font-weight:750;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.trend-item .big small{font-size:13px;font-weight:600;color:var(--muted)}
+
+/* KPI cards: one per custom metric. Wrapping grid — fills the row, wraps
+   vertically, never scrolls sideways. Kept on purpose per Justynn's
+   explicit card-grid direction (cards differ by severity and content). */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:20px;margin-top:6px}
+.kpi-card{background:var(--surface);border:1px solid var(--hairline);
+  border-radius:10px;padding:22px}
+.sev-dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+  background:var(--sev,#0f766e);flex:none}
+.kpi-card .card-tag{display:flex;align-items:center}
+.kpi-card.sev-high{--sev:#b91c1c}
+.kpi-card.sev-med{--sev:#b45309}
+.kpi-card.sev-good{--sev:#15803d}
+.kpi-card.sev-info{--sev:#0f766e}
+.kpi-card .card-tag{font-size:11.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--sev);margin-bottom:6px}
+.kpi-card h3{font-size:17px;margin:0 0 10px;letter-spacing:-.005em}
+.kpi-card .card-big{font-size:46px;font-weight:750;letter-spacing:-.02em;
+  line-height:1;margin:0 0 4px;font-variant-numeric:tabular-nums}
+.kpi-card .card-big small{font-size:14px;font-weight:600;color:var(--muted)}
+.kpi-card .card-callout{font-size:14px;margin:12px 0 0;padding:10px 12px;
+  border-radius:6px;background:var(--callout-bg,#e6f2f0);color:#3a3f47}
+.kpi-card .card-callout.sev-high{--callout-bg:#fdeeee}
+.kpi-card .card-callout.sev-med{--callout-bg:#fdf3e7}
+.kpi-card .card-callout.sev-good{--callout-bg:#e9f5ee}
+.kpi-card .card-callout.sev-info{--callout-bg:#e6f2f0}
+.kpi-card .plain{font-size:14px;color:var(--muted);margin:10px 0 0;max-width:60ch}
+
+/* Wide data tables scroll inside their own region on narrow screens; the
+   page itself never scrolls sideways. */
+.table-scroll{overflow-x:auto}
+"""
+
+# Survival-model overlay values. lifelines is not available in every render
+# environment, so these aggregates come from the canonical TW-495 model run
+# on this same synthetic dataset — provenance labeled on the page, full
+# proof in docs/evidence/TW-495-survival-analysis.tdd.md.
+SURVIVAL_OVERLAY = {
+    "model": "Cox proportional hazards — predicts WHEN a student crosses the chronic line",
+    "c_index": 0.7830,
+    "horizon_days": 21,
+    "tiers": [
+        {"name": "high", "n": 308, "event_rate": 0.565, "meaning": "intervene now"},
+        {"name": "medium", "n": 2349, "event_rate": 0.357, "meaning": "watch list"},
+        {
+            "name": "low",
+            "n": 3667,
+            "event_rate": 0.073,
+            "meaning": "routine monitoring",
+        },
+    ],
+    "provenance": (
+        "Values from the TW-495 Cox model run on this synthetic dataset "
+        "(C-index 0.7830, calibration within 0.040). lifelines is required to "
+        "recompute; see docs/evidence/TW-495-survival-analysis.tdd.md."
+    ),
+}
+
+
+_TREND_TEMPLATES = ("movement", "threshold_cross", "flat")
+
+
+def _trend_strip_html(callouts):
+    """Trend-related callouts under the hero chart (movements, threshold
+    crosses, flatlines) — compact items, severity-colored. Metric-specific
+    callouts live in their KPI cards instead."""
+    items = [c for c in callouts if c.get("template_id") in _TREND_TEMPLATES]
+    if not items:
+        return ""
+    parts = ['<div class="trend-strip"><div class="eyebrow">What changed</div>']
+    for c in items:
+        parts.append(
+            f'<div class="trend-item {c.get("sev", "sev-info")}">'
+            f'<span class="sev-dot" aria-hidden="true"></span>'
+            f'<span class="kicker">{c["kicker"]}</span>'
+            f'<span class="big">{c["big_html"]}</span></div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+_CARD_FOR_TEMPLATE = {
+    "early_warning": 0,
+    "mf_ratio": 1,
+    "recovery": 3,
+    "concentration": 4,
+}
+
+
+def _kpi_cards_html(blocks, callouts):
+    """The five custom metrics as KPI cards in a wrapping grid. Each card:
+    plain-language name, the number, its dynamic callouts (severity-tinted),
+    severity color, and the formula one click away. Metric-specific
+    callouts are matched by template_id; trend callouts stay with the hero
+    chart."""
+    by_card = {}
+    for c in callouts:
+        idx = _CARD_FOR_TEMPLATE.get(c.get("template_id"))
+        if idx is not None:
+            by_card.setdefault(idx, []).append(c)
+    cards = ['<section class="block" aria-label="Key metrics">']
+    cards.append("<h2>Five numbers worth watching</h2>")
+    cards.append(
+        '<p class="note">Five numbers that tell you what to do Monday '
+        "morning. The math behind each one is a single click away &mdash; "
+        "open &ldquo;How this is calculated&rdquo; on any card.</p>"
+        '<div class="kpi-grid">'
+    )
+    for i, b in enumerate(blocks):
+        sev = b.get("severity", "sev-info")
+        callout_html = "".join(
+            f'<p class="card-callout {c.get("sev", "sev-info")}">{c["line_html"]}</p>'
+            for c in by_card.get(i, [])
+        )
+        cards.append(
+            f'<div class="kpi-card {sev}">'
+            f'<div class="card-tag"><span class="sev-dot" '
+            f'aria-hidden="true"></span>{html.escape(b["tag"])}</div>'
+            f"<h3>{html.escape(b['name'])}</h3>"
+            f'<p class="card-big">{b["big_html"]} '
+            f"<small>{html.escape(b.get('big_label', ''))}</small></p>"
+            f"{callout_html}"
+            f'<p class="plain">{b.get("plain_html", "")}</p>'
+            '<details class="calc"><summary>How this is calculated</summary>'
+            f'<span class="formula">{html.escape(b["formula"])}</span>'
+            "</details>"
+            "</div>"
+        )
+    cards.append("</div></section>")
+    return "".join(cards)
+
+
+def _mini_table(headers, rows):
+    th = "".join(f"<th scope='col'>{html.escape(h)}</th>" for h in headers)
+    trs = []
+    for r in rows:
+        trs.append(
+            "<tr>"
+            + "".join(
+                f'<td class="num">{c}</td>' if i else f"<td>{c}</td>"
+                for i, c in enumerate(r)
+            )
+            + "</tr>"
+        )
+    return (
+        '<table class="mini"><thead><tr>'
+        + th
+        + "</tr></thead><tbody>"
+        + "".join(trs)
+        + "</tbody></table>"
+    )
+
+
+def _model_overlays_html(logistic, survival):
+    """Aggregate-only model overlays. No student-level data, no IDs.
+    Plain language on the surface; the statistics live one click away."""
+    lt = "".join(
+        f'<div class="tier {t["name"]}"><div class="t">{t["name"]} risk</div>'
+        f'<div class="c">{t["n"]:,}</div></div>'
+        for t in logistic["tiers"]
+    )
+    st = "".join(
+        f'<div class="tier {t["name"]}"><div class="t">{t["name"]} risk</div>'
+        f'<div class="c">{t["n"]:,}</div>'
+        f'<div class="t">{t["event_rate"] * 100:.1f}% become chronic</div></div>'
+        for t in survival["tiers"]
+    )
+    return (
+        '<section class="block" aria-label="Prediction models">'
+        "<h2>What happens next</h2>"
+        '<p class="note">Two ways to see what&rsquo;s coming: who is likely '
+        "to become chronically absent, and how soon. Both are trained on "
+        "this page&rsquo;s synthetic data to demonstrate the method &mdash; "
+        "a production version retrains on the district&rsquo;s real data.</p>"
+        '<div class="models">'
+        '<div class="model"><h3>Will they go chronic?</h3>'
+        '<p class="sub">Each student&rsquo;s estimated chance of crossing '
+        "the 10%-absence line next period.</p>"
+        f'<div class="statline"><span>Beats the simple rule</span><span class="n">'
+        f"{logistic['matched_precision'] * 100:.1f}% vs "
+        f"{logistic['baseline_precision'] * 100:.1f}%</span></div>"
+        f'<div class="statline"><span>Students by risk level</span></div>{lt}'
+        '<details class="calc"><summary>How accurate is it?</summary>'
+        f'<p class="fine">The model ranks a future-chronic student above a '
+        f"non-chronic one {logistic['auc'] * 100:.1f}% of the time "
+        f"(AUC {logistic['auc']:.3f}), outperforming the naive rule at the "
+        "same recall. Risk bands: high means a 50%+ estimated chance, "
+        "medium 20&ndash;50%, low under 20%. Computed live on this "
+        "page&rsquo;s dataset.</p></details></div>"
+        '<div class="model"><h3>When do they cross the line?</h3>'
+        '<p class="sub">How soon each student is likely to become '
+        "chronically absent.</p>"
+        f'<div class="statline"><span>Ranks risk in the right order</span>'
+        f'<span class="n">{survival["c_index"] * 100:.1f}%</span></div>'
+        f'<div class="statline"><span>Students by risk, {survival["horizon_days"]}-day '
+        f"horizon</span></div>{st}"
+        '<details class="calc"><summary>What does that number mean?</summary>'
+        f'<p class="fine">Concordance index {survival["c_index"]:.3f}: for any '
+        "two students, the model puts the higher-risk one first "
+        f"{survival['c_index'] * 100:.1f}% of the time. "
+        f"{html.escape(survival['provenance'])}</p></details></div>"
+        "</div></section>"
+    )
+
+
+def _callout_to_dict(c):
+    """Map an engine Callout to the render dict. Plain text in, escaped
+    HTML out — the dashboard escapes on render, never the engine.
+    template_id travels along so KPI cards can claim their callouts."""
+    return {
+        "template_id": c.template_id,
+        "kicker": html.escape(_plain_kicker(c)),
+        "big_html": html.escape(c.big),
+        "line_html": html.escape(c.line),
+        "sev": _sev_class(c),
+    }
+
+
+# Plain-language kicker tails, keyed by (template_id, direction). The
+# engine's kicker vocabulary is correct but engineer-flavored; the demo
+# page speaks superintendent. Engine text and tests are untouched — this
+# mapping lives in the presentation layer.
+_PLAIN_KICKERS = {
+    ("movement", "down"): "slipping",
+    ("movement", "up"): "improving",
+    ("threshold_cross", "down"): "needs attention",
+    ("threshold_cross", "up"): "back on track",
+    ("flat", "flat"): "no change",
+    ("early_warning", "down"): "early warning",
+    ("mf_ratio", "up"): "weekends hit hardest",
+    ("recovery", "up"): "interventions working",
+    ("concentration", "down"): "driving district losses",
+}
+
+
+def _plain_kicker(c):
+    tail = _PLAIN_KICKERS.get((c.template_id, c.direction))
+    if tail is None:
+        return c.kicker
+    return f"{c.school or 'District'} — {tail}"
+
+
+def _sev_class(c):
+    """Severity color class for a callout. High/medium come straight from
+    the engine; info splits into good news (green) vs neutral (teal)."""
+    if c.severity == "high":
+        return "sev-high"
+    if c.severity == "medium":
+        return "sev-med"
+    if c.template_id == "recovery" or (
+        c.template_id == "threshold_cross" and c.direction == "up"
+    ):
+        return "sev-good"
+    return "sev-info"
+
+
+def _block_sev(value, hi, med):
+    """Severity class for a metric block's headline number. Thresholds are
+    presentation choices, documented per block — the underlying numbers and
+    the callout engine's own thresholds are untouched."""
+    if value is None:
+        return "sev-info"
+    if value >= hi:
+        return "sev-high"
+    if value >= med:
+        return "sev-med"
+    return "sev-info"
+
+
+def compute_overlays(monthly_rows):
+    """Run the daily-grain metrics, the change-detection callout engine,
+    and the logistic backtest. Returns (callouts, metrics_data,
+    logistic_data). Aggregate only.
+
+    sklearn/numpy are imported lazily so `import dashboard` stays light.
+    """
+    from callouts import detect_callouts
+    from importer import demo_district_daily_csv
+    from metrics import (
+        chronic_early_warning,
+        instructional_days_lost,
+        monday_friday_ratio,
+        parse_daily_csv,
+        recovery_rate,
+        streak3_students,
+    )
+
+    records = parse_daily_csv(demo_district_daily_csv())
+    kw = {"district": "NKC-DEMO", "allowed_schools": DISTRICT_SCHOOL_NAMES}
+
+    cew = chronic_early_warning(records, **kw)
+    mfr = monday_friday_ratio(records, **kw)
+    st3 = streak3_students(records, **kw)
+    rec = recovery_rate(records, **kw)
+    idl = instructional_days_lost(records, **kw)
+
+    # Monthly school x period series for change detection.
+    summary = summarize(
+        monthly_rows, district="NKC-DEMO", allowed_schools=DISTRICT_SCHOOL_NAMES
+    )
+    metrics = summary["metrics"]
+    schools = sorted({m["school"] for m in metrics})
+    periods = sorted({m["period"] for m in metrics})
+    by_key = {(m["school"], m["period"]): m for m in metrics}
+    school_series = {
+        s: {
+            p: (by_key[(s, p)]["attendance_rate"] if (s, p) in by_key else None)
+            for p in periods
+        }
+        for s in schools
+    }
+
+    engine_callouts = detect_callouts(
+        school_series,
+        periods,
+        cew_schools=cew["schools"],
+        mfr_schools=mfr["schools"],
+        rec_schools=rec["schools"],
+        idl=idl,
+    )
+    callouts = [_callout_to_dict(c) for c in engine_callouts]
+
+    def top(rows, key, n=4):
+        return sorted(
+            [r for r in rows if r.get(key) is not None],
+            key=lambda r: -r[key],
+        )[:n]
+
+    cew_top = top(cew["schools"], "pct")
+    mfr_top = top(mfr["schools"], "mf_ratio")
+    st3_top = top(st3["schools"], "pct")
+    rec_top = top(rec["schools"], "pct")
+    idl_top = sorted(idl["schools"], key=lambda r: -r["days_lost"])[:4]
+
+    metrics_data = {
+        "blocks": [
+            {
+                "tag": "Early warning",
+                "name": "Who's on pace for chronic absence",
+                "severity": _block_sev(cew_top[0]["pct"], 0.70, 0.50),
+                "formula": (
+                    "pace = absent/enrolled over first 30 instructional days; "
+                    "on pace = pace >= 10%"
+                ),
+                "plain_html": (
+                    "The share of students who, after 30 school days, are "
+                    "already missing enough to end up chronically absent "
+                    "&mdash; while there is still time to intervene."
+                ),
+                "why_html": (
+                    "Most schools discover chronic absenteeism after the "
+                    "fact. This one arrives in time to act."
+                ),
+                "headline_html": (
+                    f"<strong>{html.escape(cew_top[0]['school'])}</strong> has the "
+                    f"highest share: <strong>{cew_top[0]['pct'] * 100:.1f}%</strong> "
+                    f"({cew_top[0]['on_pace_chronic']:,}/{cew_top[0]['students']:,} students)."
+                ),
+                "big_html": f"{cew_top[0]['pct'] * 100:.1f}%",
+                "big_label": "of students on pace",
+                "table_headers": ["School", "On pace", "Students", "%"],
+                "table_rows": [
+                    (
+                        html.escape(r["school"]),
+                        f"{r['on_pace_chronic']:,}",
+                        f"{r['students']:,}",
+                        f"{r['pct'] * 100:.1f}%",
+                    )
+                    for r in cew_top
+                ],
+            },
+            {
+                "tag": "The weekend effect",
+                "name": "Mondays and Fridays run hotter",
+                "severity": _block_sev(mfr_top[0]["mf_ratio"] - 1, 0.50, 0.25),
+                "formula": (
+                    "r_MF = absent/enrolled on Mon+Fri; r_mid = Tue\u2013Thu; "
+                    "metric = r_MF / r_mid"
+                ),
+                "plain_html": (
+                    "How much more absence happens on Mondays and Fridays "
+                    "compared to Tuesday through Thursday."
+                ),
+                "why_html": (
+                    "A ratio of 1.34 means Mondays and Fridays run 34% "
+                    "hotter than midweek &mdash; an engagement signal hiding "
+                    "in plain sight."
+                ),
+                "headline_html": (
+                    f"<strong>{html.escape(mfr_top[0]['school'])}</strong>: "
+                    f"Mondays and Fridays run <strong>"
+                    f"{(mfr_top[0]['mf_ratio'] - 1) * 100:.0f}% hotter</strong> "
+                    f"than midweek."
+                ),
+                "big_html": f"{(mfr_top[0]['mf_ratio'] - 1) * 100:.0f}% hotter",
+                "big_label": "Mon–Fri vs midweek",
+                "table_headers": ["School", "Mon/Fri", "Tue–Thu", "Ratio"],
+                "table_rows": [
+                    (
+                        html.escape(r["school"]),
+                        f"{r['mf_absence_rate'] * 100:.1f}%",
+                        f"{r['midweek_absence_rate'] * 100:.1f}%",
+                        f"{r['mf_ratio']:.2f}",
+                    )
+                    for r in mfr_top
+                ],
+            },
+            {
+                "tag": "Streaks",
+                "name": "Three missed days in a row",
+                "severity": _block_sev(st3_top[0]["pct"], 0.30, 0.15),
+                "formula": (
+                    "streak = longest run of consecutive absent instructional "
+                    "days (Fri\u2192Mon counts); flagged = streak \u2265 3"
+                ),
+                "plain_html": (
+                    "The share of students who missed three or more school "
+                    "days in a row."
+                ),
+                "why_html": (
+                    "A single 3-day streak predicts disengagement better than "
+                    "the same 3 absences spread across a month."
+                ),
+                "headline_html": (
+                    f"<strong>{html.escape(st3_top[0]['school'])}</strong>: "
+                    f"<strong>{st3_top[0]['pct'] * 100:.1f}%</strong> of "
+                    f"students ({st3_top[0]['students_with_streak3']:,}/"
+                    f"{st3_top[0]['students']:,}) hit a 3-day streak."
+                ),
+                "big_html": f"{st3_top[0]['pct'] * 100:.1f}%",
+                "big_label": "hit a 3-day streak",
+                "table_headers": ["School", "With streak", "Students", "%"],
+                "table_rows": [
+                    (
+                        html.escape(r["school"]),
+                        f"{r['students_with_streak3']:,}",
+                        f"{r['students']:,}",
+                        f"{r['pct'] * 100:.1f}%",
+                    )
+                    for r in st3_top
+                ],
+            },
+            {
+                "tag": "Recoveries",
+                "name": "Students who came back",
+                "severity": (
+                    "sev-good"
+                    if rec_top[0]["pct"] >= 0.90
+                    else ("sev-info" if rec_top[0]["pct"] >= 0.70 else "sev-med")
+                ),
+                "formula": (
+                    "chronic(p) = absent/enrolled \u2265 10% in period p; "
+                    "recovered = chronic(Sep) and not chronic(Oct)"
+                ),
+                "plain_html": (
+                    "The share of students who were chronically absent in "
+                    "September but back under the line in October."
+                ),
+                "why_html": (
+                    "Districts track who is absent; almost none track who "
+                    "came <em>back</em>. This is the number that justifies "
+                    "the attendance team&rsquo;s work."
+                ),
+                "headline_html": (
+                    f"<strong>{html.escape(rec_top[0]['school'])}</strong> "
+                    f"recovered <strong>{rec_top[0]['pct'] * 100:.1f}%</strong> "
+                    f"({rec_top[0]['recovered_p2']:,}/{rec_top[0]['chronic_p1']:,}) "
+                    f"of its chronic students &mdash; interventions working."
+                ),
+                "big_html": f"{rec_top[0]['pct'] * 100:.1f}%",
+                "big_label": "came back",
+                "table_headers": ["School", "Chronic (Sep)", "Back (Oct)", "%"],
+                "table_rows": [
+                    (
+                        html.escape(r["school"]),
+                        f"{r['chronic_p1']:,}",
+                        f"{r['recovered_p2']:,}",
+                        f"{r['pct'] * 100:.1f}%",
+                    )
+                    for r in rec_top
+                ],
+            },
+            {
+                "tag": "Days lost",
+                "name": "Instructional time the district lost",
+                "severity": _block_sev(
+                    idl_top[0]["days_lost"] / idl["district_days_lost"], 0.25, 0.15
+                ),
+                "formula": "days_lost = \u03a3(1 \u2212 present) over all student-days",
+                "plain_html": (
+                    "Total days of instruction students missed &mdash; the "
+                    "number behind attendance-based funding."
+                ),
+                "why_html": (
+                    "Turns an abstract percentage into the number the budget "
+                    "feels: funding the district didn&rsquo;t earn."
+                ),
+                "headline_html": (
+                    f"<strong>{idl['district_days_lost']:,}</strong> days lost "
+                    f"district-wide. {html.escape(idl_top[0]['school'])} alone: "
+                    f"<strong>{idl_top[0]['days_lost']:,}</strong>."
+                ),
+                "big_html": f"{idl['district_days_lost']:,}",
+                "big_label": "days lost district-wide",
+                "table_headers": ["School", "Days lost"],
+                "table_rows": [
+                    (html.escape(r["school"]), f"{r['days_lost']:,}") for r in idl_top
+                ],
+            },
+        ]
+    }
+
+    # Logistic overlay (TW-494): live backtest on the same synthetic data.
+    from importer import DISTRICT_SCHOOLS
+    from model import run_backtest
+    from predict import build_features, generate_day_level
+
+    schools = [(n, s, b, dict(o, monfri_lift=0.03)) for n, s, b, o in DISTRICT_SCHOOLS]
+    rows, features = build_features(list(generate_day_level(schools, seed=20261013)))
+    model_eval, base_eval, _reliability, _odds, (scaler, cal) = run_backtest(
+        rows, features
+    )
+
+    import numpy as np
+
+    X = np.array([[r[f] for f in features] for r in rows], dtype=float)
+    proba = cal.predict_proba(scaler.transform(X))[:, 1]
+    tiers = {"high": 0, "medium": 0, "low": 0}
+    for p in proba:
+        tiers["high" if p >= 0.5 else "medium" if p >= 0.2 else "low"] += 1
+
+    logistic_data = {
+        "auc": model_eval["auc"],
+        "matched_precision": model_eval["at_baseline_recall"]["precision"],
+        "baseline_precision": base_eval["precision"],
+        "tiers": [
+            {"name": "high", "n": tiers["high"]},
+            {"name": "medium", "n": tiers["medium"]},
+            {"name": "low", "n": tiers["low"]},
+        ],
+    }
+
+    return callouts, metrics_data, logistic_data
+
+
+def render_full(
+    rows,
+    *,
+    district: str,
+    allowed_schools: frozenset,
+    callouts,
+    metrics_data,
+    logistic_data,
+    title: str = "Attendance overview",
+) -> str:
+    """Presentation dashboard: hero + callouts + trend + custom metrics +
+    model overlays + school table + methodology. Aggregate only."""
+    summary = summarize(rows, district=district, allowed_schools=allowed_schools)
+    metrics = summary["metrics"]
+    by_key = {(m["school"], m["period"]): m for m in metrics}
+    schools = sorted({m["school"] for m in metrics})
+    periods = sorted({m["period"] for m in metrics})
+
+    per_period = {}
+    for p in periods:
+        pm = [m for m in metrics if m["period"] == p]
+        e = sum(m["enrolled_days"] for m in pm)
+        pr = sum(m["present_days"] for m in pm)
+        per_period[p] = pr / e if e else None
+    total_enrolled = sum(m["enrolled_days"] for m in metrics)
+    total_present = sum(m["present_days"] for m in metrics)
+    overall = (total_present / total_enrolled) if total_enrolled else None
+
+    delta = None
+    if (
+        len(periods) >= 2
+        and per_period[periods[-1]] is not None
+        and per_period[periods[-2]] is not None
+    ):
+        delta = per_period[periods[-1]] - per_period[periods[-2]]
+
+    school_series = {
+        s: {
+            p: (by_key[(s, p)]["attendance_rate"] if (s, p) in by_key else None)
+            for p in periods
+        }
+        for s in schools
+    }
+    body_rows = _performance_rows(by_key, per_period, schools, periods)
+    period_label = f"{periods[0]} &ndash; {periods[-1]}" if periods else "no periods"
+    period_range = (
+        f"{_fmt_period(periods[0])} &ndash; {_fmt_period(periods[-1])}"
+        if periods
+        else "no periods"
+    )
+    hero_rate_line = ""
+    if overall is not None and delta is not None:
+        word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
+        arrow = {"up": "+", "down": "", "flat": "\u00b1"}[word]
+        hero_rate_line = (
+            f'<p class="hero-rate">District rate <strong>{_pct(overall)}</strong> '
+            f'<span class="delta-{word}">{arrow}{delta * 100:.1f} pts vs '
+            f"{html.escape(periods[-2])}</span></p>"
+        )
+    elif overall is not None:
+        hero_rate_line = (
+            f'<p class="hero-rate">District rate <strong>{_pct(overall)}</strong></p>'
+        )
+    chart_html = ""
+    if periods and school_series:
+        chart_html = _trend_svg(school_series, per_period, periods, w=900, h=380)
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title)}</title>
+<style>{PAGE_CSS}{PAGE_CSS_EXTRA}</style></head>
+<body>
+<div class="utility"><strong>SYNTHETIC SAMPLE DATA</strong> &mdash; no real student
+records. Generated for proposal demonstration only.</div>
+<div class="wrap">
+<header class="masthead">
+<div class="eyebrow">North Kansas City Schools</div>
+<h1>Attendance Intelligence</h1>
+<p class="lede">{period_range} &middot; {len(schools)} schools &middot;
+daily attendance grain</p>
+</header>
+<section class="hero" aria-label="Attendance trend">
+<div class="eyebrow">The trend, first</div>
+{hero_rate_line}
+<div class="chart chart-hero">{chart_html}</div>
+<p class="chart-cap">Bold teal line: district weighted average.
+Gray lines: individual schools. Breaks mark periods with no reported data
+&mdash; never interpolated.</p>
+{_trend_strip_html(callouts)}
+</section>
+{_kpi_cards_html(metrics_data["blocks"], callouts)}
+{_model_overlays_html(logistic_data, SURVIVAL_OVERLAY)}
+<section class="block">
+<h2>Every school, every period</h2>
+<p class="note">One row per school per reporting period. &ldquo;Vs district&rdquo;
+compares the school&rsquo;s period rate to the district weighted rate for the
+same period, in percentage points. Color tells you where each school stands:
+red is below 90%, amber is 90&ndash;93%.</p>
+<div class="filters">{_options(schools, "f-school", "Schools")}
+{_options(periods, "f-period", "Periods")}</div>
+<div class="table-scroll"><table id="m">
+<thead><tr><th scope="col">School</th><th scope="col">Period</th>
+<th scope="col" class="num">Rate</th><th scope="col" class="num">Vs district</th>
+<th scope="col" class="num">Enrolled days</th><th scope="col" class="num">Present days</th>
+<th scope="col" class="num">Records</th><th scope="col">Note</th></tr></thead>
+<tbody>{"".join(body_rows)}</tbody></table></div>
+<div class="count" id="count">Showing {len(body_rows)} of {len(body_rows)} rows</div>
+</section>
+<section class="block">
+<h2>How these numbers are built</h2>
+<div class="method"><dl>
+<dt>Formula</dt><dd><code>attendance_rate = &Sigma;present_days &divide;
+&Sigma;enrolled_days</code>, weighted across every enrolled day in scope. School
+and district rates are never computed by averaging percentages.</dd>
+<dt>Grain</dt><dd>One record per district &times; school &times; student &times;
+period. Duplicates are rejected at import.</dd>
+<dt>Null handling</dt><dd>A zero enrolled-day denominator yields a null rate,
+shown as &ldquo;n/a&rdquo;. Periods with no reported rows are flagged as data
+gaps, not zero-filled.</dd>
+<dt>Scope</dt><dd>District <code>{html.escape(district)}</code>;
+{len(schools)} school(s) in the trusted scope. Records outside the scope are
+excluded before aggregation.</dd>
+<dt>Models</dt><dd>The prediction overlays train on <strong>synthetic</strong>
+data to demonstrate methodology. Production versions retrain on the
+district&rsquo;s real historical data under the same 9-point governance spec
+(spec, schema, assumptions, unit checks, calibration, backtest, baseline,
+failure modes, rollback). Coefficients do not transfer; the methodology
+does.</dd>
+<dt>Provenance</dt><dd>Source fingerprint
+<code class="hash">{summary["selected_source_sha256"][:16]}&hellip;</code> over the
+canonical record set. Reruns over the same source reproduce byte-identical output.</dd>
+</dl></div>
+</section>
+<div class="foot">Prepared by Twistor Holdings LLC &middot; synthetic demonstration
+for proposal purposes only.</div>
+</div><script>{PAGE_JS}</script></body></html>"""
+
+
+def demo_full() -> str:
+    """Full presentation pipeline: monthly import/publish + daily-grain
+    custom metrics + dynamic callout engine + logistic backtest."""
+    result = import_csv(demo_district_csv(), demo_mapping())
+    publish(
+        result,
+        district="NKC-DEMO",
+        allowed_schools=DISTRICT_SCHOOL_NAMES,
+    )
+    callouts, metrics_data, logistic_data = compute_overlays(result.accepted)
+    return render_full(
+        result.accepted,
+        district="NKC-DEMO",
+        allowed_schools=DISTRICT_SCHOOL_NAMES,
+        callouts=callouts,
+        metrics_data=metrics_data,
+        logistic_data=logistic_data,
+        title="Attendance Intelligence — North Kansas City Schools (synthetic demo)",
+    )
+
+
 if __name__ == "__main__":
-    page = demo()
+    page = demo_full()
     with open("attendance-dashboard.html", "w", encoding="utf-8") as fh:
         fh.write(page)
     print(f"wrote attendance-dashboard.html ({len(page):,} bytes)")
