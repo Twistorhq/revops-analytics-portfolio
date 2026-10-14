@@ -249,3 +249,27 @@ and formula dropdown. The tell is about generic AI card-wall
 aesthetics; this is the requested information architecture. File-scan
 + manual 15-tell audit is the supported path in this sandbox
 (detector CLI unavailable — known DNS limitation).
+
+### Executive polish pass (commit 95df01b, this session)
+Justynn reviewed the v6 preview on his phone and directed three changes,
+all presentation-layer, engine untouched:
+- Product masthead: eyebrow "North Kansas City Schools" + H1 "Attendance
+  Intelligence"; lede "Sep 2026 – Nov 2026 · 12 schools · daily attendance
+  grain" (internal "NKC-DEMO" code removed from the header; it remains in
+  the methodology Scope line as honest provenance).
+- Severity language refined: the full-width colored top borders on KPI
+  cards and the left bars on trend items are gone — replaced by a 9px
+  severity dot + colored kicker text. Severity signal survives as
+  color + words (redundant), without the AI-generated candy-strip look.
+- Chart density restored: preview rendered with the FULL 12-school
+  dataset via `demo_full()` (previous preview used 2-school fixture).
+  Labels use short names ("Staley HS", "NKC HS", "Antioch MS") so they
+  no longer clip on mobile; district line 3px teal, school lines 1.1px.
+- Quieter synthetic banner (slim uppercase bar, still always present).
+- Dead `.callout`-band CSS from the pre-card era removed.
+- New tests: severity-dot presence, no candy strips in CSS, masthead
+  product header, `_short_name`/`_fmt_period` unit tests.
+- Validation: 114 passed + 5 subtests (full suite incl. test_predict via
+  tts-venv). test_survival still cannot import here (no lifelines/disk —
+  pre-existing, unrelated). Ruff unavailable in this sandbox (no disk for
+  install); edits follow the file's existing style conventions.
