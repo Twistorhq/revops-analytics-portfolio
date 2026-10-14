@@ -9,10 +9,12 @@ from callouts import Callout
 from dashboard import (
     SURVIVAL_OVERLAY,
     _callout_to_dict,
+    _fmt_period,
     _kpi_cards_html,
     _model_overlays_html,
     _plain_kicker,
     _sev_class,
+    _short_name,
     _trend_strip_html,
     render_full,
 )
@@ -259,6 +261,33 @@ class KpiCardTests(unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", page)
         self.assertIn("&lt;script&gt;", page)
 
+    def test_cards_use_severity_dot_not_top_strip(self):
+        # Justynn: the full-width colored top border screams AI-generated.
+        # Severity now reads as a dot + colored kicker text.
+        b = dict(METRICS_DATA["blocks"][0], severity="sev-high")
+        page = _kpi_cards_html([b], [])
+        self.assertIn('class="sev-dot"', page)
+        self.assertIn('class="kpi-card sev-high"', page)
+
+    def test_no_ai_candy_strips_in_css(self):
+        import dashboard
+
+        css = dashboard.PAGE_CSS + dashboard.PAGE_CSS_EXTRA
+        self.assertNotIn("border-top:4px", css)
+        self.assertNotIn("border-left:4px", css)
+
+    def test_trend_items_use_severity_dot(self):
+        mv = {
+            "template_id": "movement",
+            "kicker": "Antioch &mdash; slipping",
+            "big_html": "-7.0 pts",
+            "line_html": "slipped vs Sep.",
+            "sev": "sev-high",
+        }
+        page = _trend_strip_html([mv])
+        self.assertIn('class="sev-dot"', page)
+        self.assertIn('class="trend-item sev-high"', page)
+
 
 class ModelOverlayTests(unittest.TestCase):
     def test_logistic_overlay_shows_auc_and_tiers(self):
@@ -368,6 +397,32 @@ class RenderFullTests(unittest.TestCase):
 
     def test_mobile_viewport(self):
         self.assertIn('name="viewport"', self.page)
+
+    def test_masthead_is_product_not_placeholder(self):
+        # Executive-facing: product header, no internal district code.
+        # (The methodology section's Scope line may still name the
+        # internal district code — that's honest provenance, not UI.)
+        masthead = self.page.split("</header>")[0]
+        self.assertIn("Attendance Intelligence", masthead)
+        self.assertIn("North Kansas City Schools", masthead)
+        self.assertNotIn("NKC-DEMO", masthead)
+        self.assertNotIn("student-period records", masthead)
+
+
+class HelperTests(unittest.TestCase):
+    def test_short_name(self):
+        self.assertEqual(_short_name("Staley High School"), "Staley HS")
+        self.assertEqual(_short_name("Antioch Middle School"), "Antioch MS")
+        self.assertEqual(
+            _short_name("North Kansas City High School"), "NKC HS"
+        )
+        self.assertEqual(_short_name("Bell Prairie Elementary"), "Bell Prairie")
+        self.assertEqual(_short_name("Golden Oaks Education Center"), "Golden Oaks")
+
+    def test_fmt_period(self):
+        self.assertEqual(_fmt_period("2026-09"), "Sep 2026")
+        self.assertEqual(_fmt_period("2026-11"), "Nov 2026")
+        self.assertEqual(_fmt_period("weird"), "weird")
 
 
 if __name__ == "__main__":

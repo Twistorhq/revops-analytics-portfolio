@@ -38,13 +38,15 @@ PAGE_CSS = """
 body{margin:0;background:var(--paper);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
-.utility{background:#16181d;color:#f3efe6;font-size:12.5px;letter-spacing:.02em;
-  padding:8px 24px;text-align:center}
-.utility strong{font-weight:700;letter-spacing:.08em}
+.utility{background:#23262c;color:#c9cdd4;font-size:11px;letter-spacing:.06em;
+  padding:6px 24px;text-align:center;text-transform:uppercase}
+.utility strong{font-weight:700}
 .wrap{max-width:1060px;margin:0 auto;padding:0 24px 72px}
-.masthead{padding:36px 0 8px;border-bottom:1px solid var(--hairline)}
-.masthead h1{font-size:30px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
-.masthead .lede{color:var(--muted);margin:0;font-size:15px}
+.masthead{padding:40px 0 20px;border-bottom:1px solid var(--hairline)}
+.masthead .eyebrow{color:var(--accent-deep);margin-bottom:8px}
+.masthead h1{font-size:34px;line-height:1.15;margin:0 0 8px;letter-spacing:-.02em;
+  font-weight:750}
+.masthead .lede{color:var(--muted);margin:0;font-size:14.5px}
 .hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
   gap:40px;padding:28px 0;border-bottom:1px solid var(--hairline)}
 @media(max-width:720px){.hero{grid-template-columns:1fr}}
@@ -133,6 +135,33 @@ def _pct(x, digits=1):
     return f"{x * 100:.{digits}f}%" if x is not None else "n/a"
 
 
+_MONTHS = {
+    "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun",
+    "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
+}
+
+
+def _fmt_period(p):
+    """'2026-09' -> 'Sep 2026'. Falls back to the raw value."""
+    try:
+        y, m = p.split("-")
+        return f"{_MONTHS[m]} {y}"
+    except (ValueError, KeyError):
+        return p
+
+
+def _short_name(school):
+    """Compact school name for chart labels: 'Staley High School' -> 'Staley HS'."""
+    s = school.replace("North Kansas City ", "NKC ")
+    s = s.replace(" High School", " HS").replace(" Middle School", " MS")
+    s = s.replace(" Elementary", "").replace(" Education Center", "")
+    return s
+
+
+def _na(x):
+    return x if x is not None else "n/a"
+
+
 def _points(delta):
     """Format a percentage-point delta: +0.6 pts / -1.2 pts / n/a."""
     if delta is None:
@@ -217,7 +246,7 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
         for run_pts in runs:
             d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in run_pts)
             parts.append(
-                f'<path d="{d}" fill="none" stroke="#c9c4b6" stroke-width="1.2"/>'
+                f'<path d="{d}" fill="none" stroke="#d8d3c6" stroke-width="1.1"/>'
             )
     dpts = [
         (x(i), y(r))
@@ -228,7 +257,7 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
         d = "M" + " L".join(f"{a:.1f},{b:.1f}" for a, b in dpts)
         parts.append(
             f'<path d="{d}" fill="none" stroke="#0f766e" '
-            f'stroke-width="2.6" stroke-linejoin="round"/>'
+            f'stroke-width="3" stroke-linejoin="round"/>'
         )
         for a, b in dpts:
             parts.append(f'<circle cx="{a:.1f}" cy="{b:.1f}" r="3.6" fill="#0f766e"/>')
@@ -242,7 +271,7 @@ def _trend_svg(school_series, district_series, periods, w=660, h=280):
         dy = 4 if j % 2 == 0 else -10
         parts.append(
             f'<text x="{x(i) + 8:.1f}" y="{y(r) + dy:.1f}" font-size="11.5" '
-            f'fill="#5d6470">{html.escape(school)}</text>'
+            f'fill="#5d6470">{html.escape(_short_name(school))}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
@@ -496,16 +525,6 @@ PAGE_CSS_EXTRA = """
 .wrap{max-width:1180px}
 .hero-num{font-size:84px}
 @media(max-width:720px){.hero-num{font-size:60px}}
-.callouts{border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline)}
-.callout{padding:30px 0;border-bottom:1px solid var(--hairline)}
-.callout:last-child{border-bottom:0}
-.callout .kicker{font-size:12px;font-weight:700;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--accent-deep);margin-bottom:8px}
-.callout .big{font-size:44px;font-weight:750;letter-spacing:-.02em;line-height:1.05;
-  font-variant-numeric:tabular-nums;margin:0 0 8px}
-.callout .big small{font-size:20px;font-weight:600;color:var(--muted)}
-.callout p{margin:0;font-size:16px;color:#3a3f47;max-width:70ch}
-@media(max-width:720px){.callout .big{font-size:34px}}
 .metric-block{padding:26px 0;border-bottom:1px solid var(--hairline)}
 .metric-block:last-child{border-bottom:0}
 .metric-block h3{font-size:17px;margin:0 0 6px;letter-spacing:-.005em}
@@ -545,12 +564,6 @@ PAGE_CSS_EXTRA = """
 /* Severity color language (TW-501 redesign): color answers "is this good
    or bad?" before any number is read. Functional, not decorative — the
    thresholds below mirror the callout engine's. Kept on purpose. */
-.callout{padding:26px 0 26px 20px;border-left:4px solid var(--sev,#0f766e)}
-.callout.sev-high{--sev:#b91c1c}
-.callout.sev-med{--sev:#b45309}
-.callout.sev-good{--sev:#15803d}
-.callout.sev-info{--sev:#0f766e}
-.callout .kicker{color:var(--sev)}
 .metric-block .tag.sev-high{color:#b91c1c}
 .metric-block .tag.sev-med{color:#b45309}
 .metric-block .tag.sev-good{color:#15803d}
@@ -589,8 +602,8 @@ details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70
    flatlines) under the hero chart — compact, severity-colored. */
 .trend-strip{margin-top:18px;border-top:1px solid var(--hairline);padding-top:16px}
 .trend-strip .eyebrow{margin-bottom:10px}
-.trend-item{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
-  padding:8px 0 8px 14px;border-left:4px solid var(--sev,#0f766e);margin-bottom:8px}
+.trend-item{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 0;margin-bottom:6px;border-bottom:1px solid #f0ede6}
 .trend-item:last-child{margin-bottom:0}
 .trend-item.sev-high{--sev:#b91c1c}
 .trend-item.sev-med{--sev:#b45309}
@@ -608,7 +621,10 @@ details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
   gap:20px;margin-top:6px}
 .kpi-card{background:var(--surface);border:1px solid var(--hairline);
-  border-radius:10px;padding:22px;border-top:4px solid var(--sev,#0f766e)}
+  border-radius:10px;padding:22px}
+.sev-dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+  background:var(--sev,#0f766e);flex:none}
+.kpi-card .card-tag{display:flex;align-items:center}
 .kpi-card.sev-high{--sev:#b91c1c}
 .kpi-card.sev-med{--sev:#b45309}
 .kpi-card.sev-good{--sev:#15803d}
@@ -672,6 +688,7 @@ def _trend_strip_html(callouts):
     for c in items:
         parts.append(
             f'<div class="trend-item {c.get("sev", "sev-info")}">'
+            f'<span class="sev-dot" aria-hidden="true"></span>'
             f'<span class="kicker">{c["kicker"]}</span>'
             f'<span class="big">{c["big_html"]}</span></div>'
         )
@@ -714,7 +731,8 @@ def _kpi_cards_html(blocks, callouts):
         )
         cards.append(
             f'<div class="kpi-card {sev}">'
-            f'<div class="card-tag">{html.escape(b["tag"])}</div>'
+            f'<div class="card-tag"><span class="sev-dot" '
+            f'aria-hidden="true"></span>{html.escape(b["tag"])}</div>'
             f"<h3>{html.escape(b['name'])}</h3>"
             f'<p class="card-big">{b["big_html"]} '
             f"<small>{html.escape(b.get('big_label', ''))}</small></p>"
@@ -1187,6 +1205,11 @@ def render_full(
     }
     body_rows = _performance_rows(by_key, per_period, schools, periods)
     period_label = f"{periods[0]} &ndash; {periods[-1]}" if periods else "no periods"
+    period_range = (
+        f"{_fmt_period(periods[0])} &ndash; {_fmt_period(periods[-1])}"
+        if periods
+        else "no periods"
+    )
     hero_rate_line = ""
     if overall is not None and delta is not None:
         word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
@@ -1214,9 +1237,10 @@ def render_full(
 records. Generated for proposal demonstration only.</div>
 <div class="wrap">
 <header class="masthead">
-<h1>{html.escape(title)}</h1>
-<p class="lede">District scope: {html.escape(district)} &middot; {period_label} &middot;
-{summary["selected_records"]:,} student-period records</p>
+<div class="eyebrow">North Kansas City Schools</div>
+<h1>Attendance Intelligence</h1>
+<p class="lede">{period_range} &middot; {len(schools)} schools &middot;
+daily attendance grain</p>
 </header>
 <section class="hero" aria-label="Attendance trend">
 <div class="eyebrow">The trend, first</div>
@@ -1292,7 +1316,7 @@ def demo_full() -> str:
         callouts=callouts,
         metrics_data=metrics_data,
         logistic_data=logistic_data,
-        title="Student attendance overview — North Kansas City Schools (synthetic demo)",
+        title="Attendance Intelligence — North Kansas City Schools (synthetic demo)",
     )
 
 
