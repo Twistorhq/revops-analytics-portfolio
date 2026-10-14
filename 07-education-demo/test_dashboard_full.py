@@ -5,11 +5,15 @@
 
 import unittest
 
+from callouts import Callout
 from dashboard import (
     SURVIVAL_OVERLAY,
-    _callouts_html,
-    _custom_metrics_html,
+    _callout_to_dict,
+    _kpi_cards_html,
     _model_overlays_html,
+    _plain_kicker,
+    _sev_class,
+    _trend_strip_html,
     render_full,
 )
 
@@ -73,20 +77,25 @@ def _summarize(rows, district, allowed_schools):
 
 CALLOUTS = [
     {
+        "template_id": "early_warning",
         "kicker": "Antioch Middle School &mdash; early warning",
         "big_html": "74.3% <small>on pace</small>",
         "line_html": "Three in four students on pace.",
+        "sev": "sev-high",
     }
 ]
 
 METRICS_DATA = {
     "blocks": [
         {
-            "tag": "Metric 1",
+            "tag": "Early warning",
             "name": "Chronic absenteeism early warning",
             "formula": "pace = absent/enrolled over first 30 days",
-            "why_html": "The predictive version.",
+            "plain_html": "Share of students on pace for chronic absence.",
+            "why_html": "Arrives in time to act.",
             "headline_html": "<strong>Antioch</strong> at <strong>74.3%</strong>.",
+            "big_html": "74.3%",
+            "big_label": "of students on pace",
             "table_headers": ["School", "Pct"],
             "table_rows": [("Antioch Middle School", "74.3%")],
         }
@@ -106,30 +115,147 @@ LOGISTIC = {
 
 
 class CalloutTests(unittest.TestCase):
-    def test_callouts_render_named_school_and_number(self):
-        page = _callouts_html(CALLOUTS)
-        self.assertIn("Antioch Middle School", page)
-        self.assertIn("74.3%", page)
-        self.assertIn("What the data is saying", page)
+    def test_trend_strip_shows_trend_callouts_only(self):
+        trend = {
+            "template_id": "movement",
+            "kicker": "Antioch &mdash; slipping",
+            "big_html": "-7.0 pts",
+            "line_html": "line",
+            "sev": "sev-high",
+        }
+        metric = {
+            "template_id": "early_warning",
+            "kicker": "Antioch &mdash; early warning",
+            "big_html": "74.3%",
+            "line_html": "line",
+            "sev": "sev-high",
+        }
+        page = _trend_strip_html([trend, metric])
+        self.assertIn("What changed", page)
+        self.assertIn("slipping", page)
+        self.assertNotIn("early warning", page)
 
-    def test_callouts_are_bands_not_cards(self):
-        page = _callouts_html(CALLOUTS)
-        # editorial pull-quote markup, no card-grid classes
-        self.assertIn('class="callout"', page)
-        self.assertNotIn("card", page)
+    def test_trend_strip_empty_without_trend_callouts(self):
+        metric = {
+            "template_id": "mf_ratio",
+            "kicker": "k",
+            "big_html": "1.34x",
+            "line_html": "line",
+            "sev": "sev-med",
+        }
+        self.assertEqual(_trend_strip_html([metric]), "")
+        self.assertEqual(_trend_strip_html([]), "")
+
+    def _co(self, **kw):
+        base = {
+            "template_id": "movement",
+            "school": "Antioch Middle School",
+            "metric": "attendance_rate",
+            "metric_label": "attendance rate",
+            "direction": "down",
+            "delta_pts": -7.0,
+            "value": 0.87,
+            "severity": "high",
+            "weight": 7.0,
+            "kicker": "engine kicker",
+            "big": "-7.0 pts",
+            "line": "line",
+        }
+        base.update(kw)
+        return Callout(**base)
+
+    def test_plain_kicker_mapping(self):
+        c = self._co(template_id="mf_ratio", direction="up")
+        self.assertEqual(
+            _plain_kicker(c), "Antioch Middle School — weekends hit hardest"
+        )
+        c = self._co(template_id="movement", direction="up")
+        self.assertEqual(_plain_kicker(c), "Antioch Middle School — improving")
+        c = self._co(template_id="early_warning", direction="down")
+        self.assertEqual(_plain_kicker(c), "Antioch Middle School — early warning")
+
+    def test_plain_kicker_falls_back_to_engine_text(self):
+        c = self._co(template_id="unknown_rule", direction="down")
+        self.assertEqual(_plain_kicker(c), "engine kicker")
+
+    def test_severity_color_classes(self):
+        self.assertEqual(_sev_class(self._co(severity="high")), "sev-high")
+        self.assertEqual(_sev_class(self._co(severity="medium")), "sev-med")
+        self.assertEqual(
+            _sev_class(
+                self._co(severity="info", template_id="recovery", direction="up")
+            ),
+            "sev-good",
+        )
+        self.assertEqual(
+            _sev_class(
+                self._co(
+                    severity="info",
+                    template_id="threshold_cross",
+                    direction="up",
+                )
+            ),
+            "sev-good",
+        )
+        self.assertEqual(_sev_class(self._co(severity="info")), "sev-info")
+
+    def test_callout_dict_carries_sev_template_and_escapes(self):
+        d = _callout_to_dict(self._co(school="A & B Elementary"))
+        self.assertEqual(d["sev"], "sev-high")
+        self.assertEqual(d["template_id"], "movement")
+        self.assertIn("A &amp; B Elementary", d["kicker"])
+        self.assertNotIn("A & B Elementary", d["kicker"])
+
+    def test_trend_strip_item_has_severity_class(self):
+        d = _callout_to_dict(self._co())
+        page = _trend_strip_html([d])
+        self.assertIn('class="trend-item sev-high"', page)
 
 
-class CustomMetricsTests(unittest.TestCase):
-    def test_all_blocks_render_with_formula(self):
-        page = _custom_metrics_html(METRICS_DATA)
+class KpiCardTests(unittest.TestCase):
+    def test_cards_render_with_number_formula_and_dropdown(self):
+        page = _kpi_cards_html(METRICS_DATA["blocks"], [])
         self.assertIn("Chronic absenteeism early warning", page)
+        self.assertIn("74.3%", page)
+        # formula lives one click away, not front and center
+        self.assertIn("How this is calculated", page)
+        self.assertIn("<details", page)
         self.assertIn("pace = absent/enrolled over first 30 days", page)
-        self.assertIn('class="metric-block"', page)
+        self.assertIn('class="kpi-grid"', page)
+        self.assertIn('class="kpi-card sev-info"', page)
+
+    def test_card_claims_its_metric_callout(self):
+        ew = {
+            "template_id": "early_warning",
+            "kicker": "Antioch &mdash; early warning",
+            "big_html": "74.3%",
+            "line_html": "7 in 10 on pace &mdash; intervene now.",
+            "sev": "sev-high",
+        }
+        page = _kpi_cards_html(METRICS_DATA["blocks"], [ew])
+        self.assertIn("intervene now", page)
+        self.assertIn('class="card-callout sev-high"', page)
+
+    def test_trend_callouts_do_not_land_in_cards(self):
+        mv = {
+            "template_id": "movement",
+            "kicker": "Antioch &mdash; slipping",
+            "big_html": "-7.0 pts",
+            "line_html": "slipped vs Sep.",
+            "sev": "sev-high",
+        }
+        page = _kpi_cards_html(METRICS_DATA["blocks"], [mv])
+        self.assertNotIn("slipped vs Sep", page)
+
+    def test_card_tag_carries_severity_color(self):
+        b = dict(METRICS_DATA["blocks"][0], severity="sev-high")
+        page = _kpi_cards_html([b], [])
+        self.assertIn('class="kpi-card sev-high"', page)
 
     def test_formula_text_is_escaped(self):
         evil = dict(METRICS_DATA["blocks"][0])
         evil["formula"] = "<script>alert(1)</script>"
-        page = _custom_metrics_html({"blocks": [evil]})
+        page = _kpi_cards_html([evil], [])
         self.assertNotIn("<script>alert(1)</script>", page)
         self.assertIn("&lt;script&gt;", page)
 
@@ -169,16 +295,61 @@ class RenderFullTests(unittest.TestCase):
 
     def test_sections_present_in_order(self):
         order = [
-            "What the data is saying",
-            "Trend by period",
-            "Metrics schools don",
-            "Prediction overlays",
-            "School performance",
+            "The trend, first",
+            "Five numbers worth",
+            "What happens next",
+            "Every school, every period",
             "How these numbers are built",
         ]
         idx = [self.page.find(s) for s in order]
         self.assertTrue(all(i >= 0 for i in idx), idx)
         self.assertEqual(idx, sorted(idx))
+
+    def test_no_jargon_leads_the_page(self):
+        # technical terms live in expandable dropdowns, not the main view
+        for term in ("C-index", "isotonic", "Concordance index"):
+            before = self.page.split("<details")[0]
+            self.assertNotIn(term, before)
+        self.assertIn("Concordance index", self.page)  # still in the product
+
+    def test_hero_leads_with_chart(self):
+        hero_idx = self.page.find("chart-hero")
+        cards_idx = self.page.find("Five numbers worth")
+        self.assertGreaterEqual(hero_idx, 0)
+        self.assertGreater(cards_idx, hero_idx)
+
+    def test_trend_callouts_ride_with_hero_chart(self):
+        mv = {
+            "template_id": "movement",
+            "kicker": "Antioch &mdash; slipping",
+            "big_html": "-7.0 pts",
+            "line_html": "slipped vs Sep.",
+            "sev": "sev-high",
+        }
+        page = render_full(
+            _rows(),
+            district="NKC-DEMO",
+            allowed_schools=frozenset({"Antioch Middle School", "Staley High School"}),
+            callouts=[mv],
+            metrics_data=METRICS_DATA,
+            logistic_data=LOGISTIC,
+            title="Full demo",
+        )
+        hero_idx = page.find("What changed")
+        cards_idx = page.find("Five numbers worth")
+        self.assertGreaterEqual(hero_idx, 0)
+        self.assertGreater(cards_idx, hero_idx)
+        self.assertIn("slipping", page[:cards_idx])
+
+    def test_metric_callout_lands_in_its_card(self):
+        # the fixture early_warning callout renders inside the KPI card
+        card_idx = self.page.find('class="kpi-card')
+        self.assertGreaterEqual(card_idx, 0)
+        self.assertIn("Three in four students on pace", self.page[card_idx:])
+
+    def test_wide_table_has_scroll_region(self):
+        # the page itself never scrolls sideways
+        self.assertIn("table-scroll", self.page)
 
     def test_synthetic_banner_and_attribution(self):
         self.assertIn("SYNTHETIC SAMPLE DATA", self.page)

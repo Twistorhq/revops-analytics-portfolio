@@ -5,10 +5,16 @@ Stdlib only, no external assets — works offline. Aggregate only: no
 student-level data ever reaches the page. Synthetic data is labeled on
 every render.
 
-Design brief: read like a serious internal analytics tool built by a
-senior data engineer. Every number labeled, every chart honest, the
-math documented on the page. No decorative gradients, no emoji-as-UI,
-no card-grid slop.
+Design brief (TW-501 redesign, card layout): content-first and colorful
+for a non-technical audience. The trend chart is the hero — large and
+prominent at the top. Below it, the five custom metrics live in KPI
+cards (wrapping grid, still one vertical stream): plain-language name,
+the number, its dynamic callouts, severity color, and the formula one
+click away in a "How this is calculated" dropdown. A superintendent
+should gain value instantly: plain-language headings, a severity color
+language (red/amber/green) that answers "is this good or bad?" before
+any number is read. The math stays in the product, it just stops
+leading. No decorative gradients, no emoji-as-UI.
 """
 
 import html
@@ -140,13 +146,14 @@ def _points(delta):
     return f'<span class="{cls}">{sign}{delta * 100:.1f} pts</span>'
 
 
-def _trend_svg(school_series, district_series, periods):
+def _trend_svg(school_series, district_series, periods, w=660, h=280):
     """Hand-built SVG line chart: attendance rate by period.
 
     school_series: {school: {period: rate|None}}. district_series:
     {period: rate|None}. Gaps (None) break the line — never interpolated.
+    w/h set the canvas size; the hero uses a larger canvas.
     """
-    W, H = 660, 280
+    W, H = w, h
     pad_l, pad_r, pad_t, pad_b = 46, 90, 14, 30
     iw, ih = W - pad_l - pad_r, H - pad_t - pad_b
 
@@ -534,6 +541,95 @@ PAGE_CSS_EXTRA = """
 .model .fine{font-size:12.5px;color:var(--faint);margin:12px 0 0}
 .model code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
   background:#efede8;padding:1px 6px;border-radius:4px;color:var(--ink)}
+
+/* Severity color language (TW-501 redesign): color answers "is this good
+   or bad?" before any number is read. Functional, not decorative — the
+   thresholds below mirror the callout engine's. Kept on purpose. */
+.callout{padding:26px 0 26px 20px;border-left:4px solid var(--sev,#0f766e)}
+.callout.sev-high{--sev:#b91c1c}
+.callout.sev-med{--sev:#b45309}
+.callout.sev-good{--sev:#15803d}
+.callout.sev-info{--sev:#0f766e}
+.callout .kicker{color:var(--sev)}
+.metric-block .tag.sev-high{color:#b91c1c}
+.metric-block .tag.sev-med{color:#b45309}
+.metric-block .tag.sev-good{color:#15803d}
+.metric-block .tag.sev-info{color:#0f766e}
+.metric-block .headline.sev-high strong{color:#b91c1c}
+.metric-block .headline.sev-med strong{color:#b45309}
+.metric-block .headline.sev-good strong{color:#15803d}
+.hero-num.bad{color:#b91c1c}
+.metric-block .plain{font-size:14.5px;color:#3a3f47;margin:6px 0 10px;max-width:72ch}
+
+/* Expandable math: formulas live one click away, never leading. */
+details.calc{margin:14px 0 4px}
+details.calc summary{cursor:pointer;font-size:13.5px;font-weight:600;
+  color:var(--accent-deep);display:inline-block;border-radius:4px}
+details.calc summary:hover{text-decoration:underline}
+details.calc summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+details.calc .formula{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px;background:#efede8;padding:8px 12px;border-radius:6px;
+  color:var(--ink);margin:10px 0;display:inline-block;max-width:100%}
+details.calc .fine{font-size:13px;color:var(--muted);margin:8px 0 0;max-width:70ch}
+
+/* Single vertical stream (layout direction): one column, one direction of
+   travel. Hero stacks; model panels stack; nothing sits side-by-side. */
+.hero{display:block}
+.hero-side{margin-top:20px}
+.hero-rate{font-size:17px;margin:0 0 16px;color:var(--muted)}
+.hero-rate strong{font-size:24px;color:var(--ink);font-variant-numeric:tabular-nums}
+.models{display:block}
+.model{margin-bottom:20px}
+.model:last-child{margin-bottom:0}
+
+/* Hero chart: the centerpiece. Larger canvas, same honest lines. */
+.chart-hero{padding:24px 20px 12px}
+
+/* Trend strip: trend-related callouts (movement, threshold crosses,
+   flatlines) under the hero chart — compact, severity-colored. */
+.trend-strip{margin-top:18px;border-top:1px solid var(--hairline);padding-top:16px}
+.trend-strip .eyebrow{margin-bottom:10px}
+.trend-item{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+  padding:8px 0 8px 14px;border-left:4px solid var(--sev,#0f766e);margin-bottom:8px}
+.trend-item:last-child{margin-bottom:0}
+.trend-item.sev-high{--sev:#b91c1c}
+.trend-item.sev-med{--sev:#b45309}
+.trend-item.sev-good{--sev:#15803d}
+.trend-item.sev-info{--sev:#0f766e}
+.trend-item .kicker{font-size:12px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--sev)}
+.trend-item .big{font-size:24px;font-weight:750;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.trend-item .big small{font-size:13px;font-weight:600;color:var(--muted)}
+
+/* KPI cards: one per custom metric. Wrapping grid — fills the row, wraps
+   vertically, never scrolls sideways. Kept on purpose per Justynn's
+   explicit card-grid direction (cards differ by severity and content). */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+  gap:20px;margin-top:6px}
+.kpi-card{background:var(--surface);border:1px solid var(--hairline);
+  border-radius:10px;padding:22px;border-top:4px solid var(--sev,#0f766e)}
+.kpi-card.sev-high{--sev:#b91c1c}
+.kpi-card.sev-med{--sev:#b45309}
+.kpi-card.sev-good{--sev:#15803d}
+.kpi-card.sev-info{--sev:#0f766e}
+.kpi-card .card-tag{font-size:11.5px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--sev);margin-bottom:6px}
+.kpi-card h3{font-size:17px;margin:0 0 10px;letter-spacing:-.005em}
+.kpi-card .card-big{font-size:46px;font-weight:750;letter-spacing:-.02em;
+  line-height:1;margin:0 0 4px;font-variant-numeric:tabular-nums}
+.kpi-card .card-big small{font-size:14px;font-weight:600;color:var(--muted)}
+.kpi-card .card-callout{font-size:14px;margin:12px 0 0;padding:10px 12px;
+  border-radius:6px;background:var(--callout-bg,#e6f2f0);color:#3a3f47}
+.kpi-card .card-callout.sev-high{--callout-bg:#fdeeee}
+.kpi-card .card-callout.sev-med{--callout-bg:#fdf3e7}
+.kpi-card .card-callout.sev-good{--callout-bg:#e9f5ee}
+.kpi-card .card-callout.sev-info{--callout-bg:#e6f2f0}
+.kpi-card .plain{font-size:14px;color:var(--muted);margin:10px 0 0;max-width:60ch}
+
+/* Wide data tables scroll inside their own region on narrow screens; the
+   page itself never scrolls sideways. */
+.table-scroll{overflow-x:auto}
 """
 
 # Survival-model overlay values. lifelines is not available in every render
@@ -562,26 +658,75 @@ SURVIVAL_OVERLAY = {
 }
 
 
-def _callouts_html(callouts):
-    """Editorial pull-quotes: big number, named school, one quotable line.
-    Full-width bands, not cards."""
-    parts = ['<section class="block callouts" aria-label="Key findings">']
-    parts.append("<h2>What the data is saying</h2>")
-    parts.append(
-        '<p class="note">Findings worth quoting. Every number below is '
-        "computed from the synthetic dataset on this page &mdash; nothing is "
-        "hand-written.</p>"
-    )
-    for c in callouts:
+_TREND_TEMPLATES = ("movement", "threshold_cross", "flat")
+
+
+def _trend_strip_html(callouts):
+    """Trend-related callouts under the hero chart (movements, threshold
+    crosses, flatlines) — compact items, severity-colored. Metric-specific
+    callouts live in their KPI cards instead."""
+    items = [c for c in callouts if c.get("template_id") in _TREND_TEMPLATES]
+    if not items:
+        return ""
+    parts = ['<div class="trend-strip"><div class="eyebrow">What changed</div>']
+    for c in items:
         parts.append(
-            '<div class="callout">'
-            f'<div class="kicker">{html.escape(c["kicker"])}</div>'
-            f'<p class="big">{c["big_html"]}</p>'
-            f"<p>{c['line_html']}</p>"
+            f'<div class="trend-item {c.get("sev", "sev-info")}">'
+            f'<span class="kicker">{c["kicker"]}</span>'
+            f'<span class="big">{c["big_html"]}</span></div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+_CARD_FOR_TEMPLATE = {
+    "early_warning": 0,
+    "mf_ratio": 1,
+    "recovery": 3,
+    "concentration": 4,
+}
+
+
+def _kpi_cards_html(blocks, callouts):
+    """The five custom metrics as KPI cards in a wrapping grid. Each card:
+    plain-language name, the number, its dynamic callouts (severity-tinted),
+    severity color, and the formula one click away. Metric-specific
+    callouts are matched by template_id; trend callouts stay with the hero
+    chart."""
+    by_card = {}
+    for c in callouts:
+        idx = _CARD_FOR_TEMPLATE.get(c.get("template_id"))
+        if idx is not None:
+            by_card.setdefault(idx, []).append(c)
+    cards = ['<section class="block" aria-label="Key metrics">']
+    cards.append("<h2>Five numbers worth watching</h2>")
+    cards.append(
+        '<p class="note">Five numbers that tell you what to do Monday '
+        "morning. The math behind each one is a single click away &mdash; "
+        "open &ldquo;How this is calculated&rdquo; on any card.</p>"
+        '<div class="kpi-grid">'
+    )
+    for i, b in enumerate(blocks):
+        sev = b.get("severity", "sev-info")
+        callout_html = "".join(
+            f'<p class="card-callout {c.get("sev", "sev-info")}">{c["line_html"]}</p>'
+            for c in by_card.get(i, [])
+        )
+        cards.append(
+            f'<div class="kpi-card {sev}">'
+            f'<div class="card-tag">{html.escape(b["tag"])}</div>'
+            f"<h3>{html.escape(b['name'])}</h3>"
+            f'<p class="card-big">{b["big_html"]} '
+            f"<small>{html.escape(b.get('big_label', ''))}</small></p>"
+            f"{callout_html}"
+            f'<p class="plain">{b.get("plain_html", "")}</p>'
+            '<details class="calc"><summary>How this is calculated</summary>'
+            f'<span class="formula">{html.escape(b["formula"])}</span>'
+            "</details>"
             "</div>"
         )
-    parts.append("</section>")
-    return "".join(parts)
+    cards.append("</div></section>")
+    return "".join(cards)
 
 
 def _mini_table(headers, rows):
@@ -605,83 +750,120 @@ def _mini_table(headers, rows):
     )
 
 
-def _custom_metrics_html(m):
-    """The five TW-493 metrics, each with its formula and headline school."""
-    blocks = ['<section class="block" aria-label="Custom metrics">']
-    blocks.append("<h2>Metrics schools don&rsquo;t usually track</h2>")
-    blocks.append(
-        '<p class="note">Five decision-driving metrics with one precise '
-        "definition each. Schools usually discover chronic absenteeism after "
-        "the fact; these are the versions that arrive in time to act.</p>"
-    )
-    for b in m["blocks"]:
-        rows = _mini_table(b["table_headers"], b["table_rows"])
-        blocks.append(
-            '<div class="metric-block">'
-            f'<h3><span class="tag">{html.escape(b["tag"])}</span>'
-            f"{html.escape(b['name'])}</h3>"
-            f'<span class="formula">{html.escape(b["formula"])}</span>'
-            f'<p class="why">{b["why_html"]}</p>'
-            f'<p class="headline">{b["headline_html"]}</p>'
-            f"{rows}</div>"
-        )
-    blocks.append("</section>")
-    return "".join(blocks)
-
-
 def _model_overlays_html(logistic, survival):
-    """Aggregate-only model overlays. No student-level data, no IDs."""
+    """Aggregate-only model overlays. No student-level data, no IDs.
+    Plain language on the surface; the statistics live one click away."""
     lt = "".join(
-        f'<div class="tier {t["name"]}"><div class="t">{t["name"]}</div>'
+        f'<div class="tier {t["name"]}"><div class="t">{t["name"]} risk</div>'
         f'<div class="c">{t["n"]:,}</div></div>'
         for t in logistic["tiers"]
     )
     st = "".join(
-        f'<div class="tier {t["name"]}"><div class="t">{t["name"]}</div>'
+        f'<div class="tier {t["name"]}"><div class="t">{t["name"]} risk</div>'
         f'<div class="c">{t["n"]:,}</div>'
-        f'<div class="t">{t["event_rate"] * 100:.1f}% event rate</div></div>'
+        f'<div class="t">{t["event_rate"] * 100:.1f}% become chronic</div></div>'
         for t in survival["tiers"]
     )
     return (
         '<section class="block" aria-label="Prediction models">'
-        "<h2>Prediction overlays</h2>"
-        '<p class="note">Two models trained on this synthetic data to '
-        "demonstrate methodology. Production versions retrain on the "
-        "district&rsquo;s real historical data &mdash; the coefficients do "
-        "not transfer, the methodology does.</p>"
+        "<h2>What happens next</h2>"
+        '<p class="note">Two ways to see what&rsquo;s coming: who is likely '
+        "to become chronically absent, and how soon. Both are trained on "
+        "this page&rsquo;s synthetic data to demonstrate the method &mdash; "
+        "a production version retrains on the district&rsquo;s real data.</p>"
         '<div class="models">'
         '<div class="model"><h3>Will they go chronic?</h3>'
-        '<p class="sub">Logistic regression &mdash; calibrated probability a '
-        "student crosses the 10% line next period.</p>"
-        f'<div class="statline"><span>Backtest AUC</span><span class="n">'
-        f"{logistic['auc']:.3f}</span></div>"
-        f'<div class="statline"><span>Beats the naive rule</span><span class="n">'
+        '<p class="sub">Each student&rsquo;s estimated chance of crossing '
+        "the 10%-absence line next period.</p>"
+        f'<div class="statline"><span>Beats the simple rule</span><span class="n">'
         f"{logistic['matched_precision'] * 100:.1f}% vs "
         f"{logistic['baseline_precision'] * 100:.1f}%</span></div>"
-        f'<div class="statline"><span>Risk tiers, all students</span></div>{lt}'
-        '<p class="fine">Tiers from calibrated P: high &ge; 0.50, medium '
-        "0.20&ndash;0.50, low &lt; 0.20. Computed live on this page&rsquo;s "
-        "dataset.</p></div>"
+        f'<div class="statline"><span>Students by risk level</span></div>{lt}'
+        '<details class="calc"><summary>How accurate is it?</summary>'
+        f'<p class="fine">The model ranks a future-chronic student above a '
+        f"non-chronic one {logistic['auc'] * 100:.1f}% of the time "
+        f"(AUC {logistic['auc']:.3f}), outperforming the naive rule at the "
+        "same recall. Risk bands: high means a 50%+ estimated chance, "
+        "medium 20&ndash;50%, low under 20%. Computed live on this "
+        "page&rsquo;s dataset.</p></details></div>"
         '<div class="model"><h3>When do they cross the line?</h3>'
-        '<p class="sub">Cox survival model &mdash; predicted median days '
-        "until a student becomes chronically absent.</p>"
-        f'<div class="statline"><span>Concordance index</span><span class="n">'
-        f"{survival['c_index']:.3f}</span></div>"
-        f'<div class="statline"><span>Risk tiers, {survival["horizon_days"]}-day '
+        '<p class="sub">How soon each student is likely to become '
+        "chronically absent.</p>"
+        f'<div class="statline"><span>Ranks risk in the right order</span>'
+        f'<span class="n">{survival["c_index"] * 100:.1f}%</span></div>'
+        f'<div class="statline"><span>Students by risk, {survival["horizon_days"]}-day '
         f"horizon</span></div>{st}"
-        f'<p class="fine">{html.escape(survival["provenance"])}</p></div>'
+        '<details class="calc"><summary>What does that number mean?</summary>'
+        f'<p class="fine">Concordance index {survival["c_index"]:.3f}: for any '
+        "two students, the model puts the higher-risk one first "
+        f"{survival['c_index'] * 100:.1f}% of the time. "
+        f"{html.escape(survival['provenance'])}</p></details></div>"
         "</div></section>"
     )
 
 
 def _callout_to_dict(c):
     """Map an engine Callout to the render dict. Plain text in, escaped
-    HTML out — the dashboard escapes on render, never the engine."""
+    HTML out — the dashboard escapes on render, never the engine.
+    template_id travels along so KPI cards can claim their callouts."""
     return {
-        "kicker": html.escape(c.kicker),
+        "template_id": c.template_id,
+        "kicker": html.escape(_plain_kicker(c)),
         "big_html": html.escape(c.big),
         "line_html": html.escape(c.line),
+        "sev": _sev_class(c),
     }
+
+
+# Plain-language kicker tails, keyed by (template_id, direction). The
+# engine's kicker vocabulary is correct but engineer-flavored; the demo
+# page speaks superintendent. Engine text and tests are untouched — this
+# mapping lives in the presentation layer.
+_PLAIN_KICKERS = {
+    ("movement", "down"): "slipping",
+    ("movement", "up"): "improving",
+    ("threshold_cross", "down"): "needs attention",
+    ("threshold_cross", "up"): "back on track",
+    ("flat", "flat"): "no change",
+    ("early_warning", "down"): "early warning",
+    ("mf_ratio", "up"): "weekends hit hardest",
+    ("recovery", "up"): "interventions working",
+    ("concentration", "down"): "driving district losses",
+}
+
+
+def _plain_kicker(c):
+    tail = _PLAIN_KICKERS.get((c.template_id, c.direction))
+    if tail is None:
+        return c.kicker
+    return f"{c.school or 'District'} — {tail}"
+
+
+def _sev_class(c):
+    """Severity color class for a callout. High/medium come straight from
+    the engine; info splits into good news (green) vs neutral (teal)."""
+    if c.severity == "high":
+        return "sev-high"
+    if c.severity == "medium":
+        return "sev-med"
+    if c.template_id == "recovery" or (
+        c.template_id == "threshold_cross" and c.direction == "up"
+    ):
+        return "sev-good"
+    return "sev-info"
+
+
+def _block_sev(value, hi, med):
+    """Severity class for a metric block's headline number. Thresholds are
+    presentation choices, documented per block — the underlying numbers and
+    the callout engine's own thresholds are untouched."""
+    if value is None:
+        return "sev-info"
+    if value >= hi:
+        return "sev-high"
+    if value >= med:
+        return "sev-med"
+    return "sev-info"
 
 
 def compute_overlays(monthly_rows):
@@ -752,22 +934,30 @@ def compute_overlays(monthly_rows):
     metrics_data = {
         "blocks": [
             {
-                "tag": "Metric 1 \u2014 the predictive version",
-                "name": "Chronic absenteeism early warning",
+                "tag": "Early warning",
+                "name": "Who's on pace for chronic absence",
+                "severity": _block_sev(cew_top[0]["pct"], 0.70, 0.50),
                 "formula": (
                     "pace = absent/enrolled over first 30 instructional days; "
                     "on pace = pace >= 10%"
                 ),
+                "plain_html": (
+                    "The share of students who, after 30 school days, are "
+                    "already missing enough to end up chronically absent "
+                    "&mdash; while there is still time to intervene."
+                ),
                 "why_html": (
-                    "The version schools rarely compute: who is <em>on pace</em> "
-                    "for chronic status while there is still time to act."
+                    "Most schools discover chronic absenteeism after the "
+                    "fact. This one arrives in time to act."
                 ),
                 "headline_html": (
-                    f"<strong>{html.escape(cew_top[0]['school'])}</strong> leads at "
-                    f"<strong>{cew_top[0]['pct'] * 100:.1f}%</strong> "
+                    f"<strong>{html.escape(cew_top[0]['school'])}</strong> has the "
+                    f"highest share: <strong>{cew_top[0]['pct'] * 100:.1f}%</strong> "
                     f"({cew_top[0]['on_pace_chronic']:,}/{cew_top[0]['students']:,} students)."
                 ),
-                "table_headers": ["School", "On pace", "Students", "Pct"],
+                "big_html": f"{cew_top[0]['pct'] * 100:.1f}%",
+                "big_label": "of students on pace",
+                "table_headers": ["School", "On pace", "Students", "%"],
                 "table_rows": [
                     (
                         html.escape(r["school"]),
@@ -779,22 +969,31 @@ def compute_overlays(monthly_rows):
                 ],
             },
             {
-                "tag": "Metric 2 \u2014 the pattern nobody quantifies",
-                "name": "Monday/Friday ratio",
+                "tag": "The weekend effect",
+                "name": "Mondays and Fridays run hotter",
+                "severity": _block_sev(mfr_top[0]["mf_ratio"] - 1, 0.50, 0.25),
                 "formula": (
                     "r_MF = absent/enrolled on Mon+Fri; r_mid = Tue\u2013Thu; "
                     "metric = r_MF / r_mid"
                 ),
+                "plain_html": (
+                    "How much more absence happens on Mondays and Fridays "
+                    "compared to Tuesday through Thursday."
+                ),
                 "why_html": (
-                    "A ratio of 1.34 means Mon/Fri absence runs 34% hotter "
-                    "than midweek &mdash; an engagement signal hiding in plain sight."
+                    "A ratio of 1.34 means Mondays and Fridays run 34% "
+                    "hotter than midweek &mdash; an engagement signal hiding "
+                    "in plain sight."
                 ),
                 "headline_html": (
-                    f"<strong>{html.escape(mfr_top[0]['school'])}</strong> at "
-                    f"<strong>{mfr_top[0]['mf_ratio']:.2f}</strong> &mdash; the "
-                    f"weekend edge is strongest there."
+                    f"<strong>{html.escape(mfr_top[0]['school'])}</strong>: "
+                    f"Mondays and Fridays run <strong>"
+                    f"{(mfr_top[0]['mf_ratio'] - 1) * 100:.0f}% hotter</strong> "
+                    f"than midweek."
                 ),
-                "table_headers": ["School", "Mon/Fri rate", "Midweek rate", "Ratio"],
+                "big_html": f"{(mfr_top[0]['mf_ratio'] - 1) * 100:.0f}% hotter",
+                "big_label": "Mon–Fri vs midweek",
+                "table_headers": ["School", "Mon/Fri", "Tue–Thu", "Ratio"],
                 "table_rows": [
                     (
                         html.escape(r["school"]),
@@ -806,11 +1005,16 @@ def compute_overlays(monthly_rows):
                 ],
             },
             {
-                "tag": "Metric 3 \u2014 the intervention trigger",
-                "name": "Consecutive-absence streaks (3+ days)",
+                "tag": "Streaks",
+                "name": "Three missed days in a row",
+                "severity": _block_sev(st3_top[0]["pct"], 0.30, 0.15),
                 "formula": (
                     "streak = longest run of consecutive absent instructional "
                     "days (Fri\u2192Mon counts); flagged = streak \u2265 3"
+                ),
+                "plain_html": (
+                    "The share of students who missed three or more school "
+                    "days in a row."
                 ),
                 "why_html": (
                     "A single 3-day streak predicts disengagement better than "
@@ -822,7 +1026,9 @@ def compute_overlays(monthly_rows):
                     f"students ({st3_top[0]['students_with_streak3']:,}/"
                     f"{st3_top[0]['students']:,}) hit a 3-day streak."
                 ),
-                "table_headers": ["School", "With streak", "Students", "Pct"],
+                "big_html": f"{st3_top[0]['pct'] * 100:.1f}%",
+                "big_label": "hit a 3-day streak",
+                "table_headers": ["School", "With streak", "Students", "%"],
                 "table_rows": [
                     (
                         html.escape(r["school"]),
@@ -834,16 +1040,25 @@ def compute_overlays(monthly_rows):
                 ],
             },
             {
-                "tag": "Metric 4 \u2014 did the intervention work?",
-                "name": "Recovery rate",
+                "tag": "Recoveries",
+                "name": "Students who came back",
+                "severity": (
+                    "sev-good"
+                    if rec_top[0]["pct"] >= 0.90
+                    else ("sev-info" if rec_top[0]["pct"] >= 0.70 else "sev-med")
+                ),
                 "formula": (
                     "chronic(p) = absent/enrolled \u2265 10% in period p; "
                     "recovered = chronic(Sep) and not chronic(Oct)"
                 ),
+                "plain_html": (
+                    "The share of students who were chronically absent in "
+                    "September but back under the line in October."
+                ),
                 "why_html": (
-                    "Districts track who is absent; almost none track who came "
-                    "<em>back</em>. This is the metric that justifies the "
-                    "attendance team&rsquo;s budget."
+                    "Districts track who is absent; almost none track who "
+                    "came <em>back</em>. This is the number that justifies "
+                    "the attendance team&rsquo;s work."
                 ),
                 "headline_html": (
                     f"<strong>{html.escape(rec_top[0]['school'])}</strong> "
@@ -851,7 +1066,9 @@ def compute_overlays(monthly_rows):
                     f"({rec_top[0]['recovered_p2']:,}/{rec_top[0]['chronic_p1']:,}) "
                     f"of its chronic students &mdash; interventions working."
                 ),
-                "table_headers": ["School", "Chronic (Sep)", "Recovered (Oct)", "Pct"],
+                "big_html": f"{rec_top[0]['pct'] * 100:.1f}%",
+                "big_label": "came back",
+                "table_headers": ["School", "Chronic (Sep)", "Back (Oct)", "%"],
                 "table_rows": [
                     (
                         html.escape(r["school"]),
@@ -863,18 +1080,27 @@ def compute_overlays(monthly_rows):
                 ],
             },
             {
-                "tag": "Metric 5 \u2014 the CFO number",
-                "name": "Instructional days lost",
+                "tag": "Days lost",
+                "name": "Instructional time the district lost",
+                "severity": _block_sev(
+                    idl_top[0]["days_lost"] / idl["district_days_lost"], 0.25, 0.15
+                ),
                 "formula": "days_lost = \u03a3(1 \u2212 present) over all student-days",
+                "plain_html": (
+                    "Total days of instruction students missed &mdash; the "
+                    "number behind attendance-based funding."
+                ),
                 "why_html": (
-                    "Turns an abstract rate into the number the CFO feels: "
-                    "attendance-based funding not earned."
+                    "Turns an abstract percentage into the number the budget "
+                    "feels: funding the district didn&rsquo;t earn."
                 ),
                 "headline_html": (
                     f"<strong>{idl['district_days_lost']:,}</strong> days lost "
                     f"district-wide. {html.escape(idl_top[0]['school'])} alone: "
                     f"<strong>{idl_top[0]['days_lost']:,}</strong>."
                 ),
+                "big_html": f"{idl['district_days_lost']:,}",
+                "big_label": "days lost district-wide",
                 "table_headers": ["School", "Days lost"],
                 "table_rows": [
                     (html.escape(r["school"]), f"{r['days_lost']:,}") for r in idl_top
@@ -951,14 +1177,6 @@ def render_full(
         and per_period[periods[-2]] is not None
     ):
         delta = per_period[periods[-1]] - per_period[periods[-2]]
-    delta_html = ""
-    if delta is not None:
-        word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
-        arrow = {"up": "+", "down": "", "flat": "\u00b1"}[word]
-        delta_html = (
-            f'<div class="hero-delta {word}">{arrow}'
-            f"{delta * 100:.1f} pts vs {html.escape(periods[-2])}</div>"
-        )
 
     school_series = {
         s: {
@@ -969,6 +1187,22 @@ def render_full(
     }
     body_rows = _performance_rows(by_key, per_period, schools, periods)
     period_label = f"{periods[0]} &ndash; {periods[-1]}" if periods else "no periods"
+    hero_rate_line = ""
+    if overall is not None and delta is not None:
+        word = "up" if delta > 0.0005 else ("down" if delta < -0.0005 else "flat")
+        arrow = {"up": "+", "down": "", "flat": "\u00b1"}[word]
+        hero_rate_line = (
+            f'<p class="hero-rate">District rate <strong>{_pct(overall)}</strong> '
+            f'<span class="delta-{word}">{arrow}{delta * 100:.1f} pts vs '
+            f"{html.escape(periods[-2])}</span></p>"
+        )
+    elif overall is not None:
+        hero_rate_line = (
+            f'<p class="hero-rate">District rate <strong>{_pct(overall)}</strong></p>'
+        )
+    chart_html = ""
+    if periods and school_series:
+        chart_html = _trend_svg(school_series, per_period, periods, w=900, h=380)
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -984,48 +1218,31 @@ records. Generated for proposal demonstration only.</div>
 <p class="lede">District scope: {html.escape(district)} &middot; {period_label} &middot;
 {summary["selected_records"]:,} student-period records</p>
 </header>
-<section class="hero" aria-label="District headline metrics">
-<div>
-<div class="eyebrow">District attendance rate</div>
-<div class="hero-num">{_pct(overall)}</div>
-{delta_html}
-<p class="hero-def">Weighted across every enrolled day:
-<code>&Sigma;present &divide; &Sigma;enrolled</code>. Rates are never averaged
-across schools or periods; a zero denominator is reported as null.</p>
-</div>
-<div class="hero-side">
-<div class="stat-row">
-<div class="stat"><div class="k">Enrolled days</div><div class="v">{total_enrolled:,}</div></div>
-<div class="stat"><div class="k">Present days</div><div class="v">{total_present:,}</div></div>
-<div class="stat"><div class="k">Schools</div><div class="v">{len(schools)}</div></div>
-<div class="stat"><div class="k">Periods</div><div class="v">{len(periods)}</div></div>
-</div>
-</div>
-</section>
-{_callouts_html(callouts)}
-<section class="block"><h2>Trend by period</h2>
-<p class="note">Attendance rate per reporting period. Breaks in a
-line mark periods with no reported data &mdash; never
-interpolated.</p>
-<div class="chart">{_trend_svg(school_series, per_period, periods)}</div>
+<section class="hero" aria-label="Attendance trend">
+<div class="eyebrow">The trend, first</div>
+{hero_rate_line}
+<div class="chart chart-hero">{chart_html}</div>
 <p class="chart-cap">Bold teal line: district weighted average.
-Gray lines: individual schools. The November dip reflects the
-seasonal absence bump in the synthetic data.</p></section>
-{_custom_metrics_html(metrics_data)}
+Gray lines: individual schools. Breaks mark periods with no reported data
+&mdash; never interpolated.</p>
+{_trend_strip_html(callouts)}
+</section>
+{_kpi_cards_html(metrics_data["blocks"], callouts)}
 {_model_overlays_html(logistic_data, SURVIVAL_OVERLAY)}
 <section class="block">
-<h2>School performance</h2>
+<h2>Every school, every period</h2>
 <p class="note">One row per school per reporting period. &ldquo;Vs district&rdquo;
 compares the school&rsquo;s period rate to the district weighted rate for the
-same period, in percentage points.</p>
+same period, in percentage points. Color tells you where each school stands:
+red is below 90%, amber is 90&ndash;93%.</p>
 <div class="filters">{_options(schools, "f-school", "Schools")}
 {_options(periods, "f-period", "Periods")}</div>
-<table id="m">
+<div class="table-scroll"><table id="m">
 <thead><tr><th scope="col">School</th><th scope="col">Period</th>
 <th scope="col" class="num">Rate</th><th scope="col" class="num">Vs district</th>
 <th scope="col" class="num">Enrolled days</th><th scope="col" class="num">Present days</th>
 <th scope="col" class="num">Records</th><th scope="col">Note</th></tr></thead>
-<tbody>{"".join(body_rows)}</tbody></table>
+<tbody>{"".join(body_rows)}</tbody></table></div>
 <div class="count" id="count">Showing {len(body_rows)} of {len(body_rows)} rows</div>
 </section>
 <section class="block">
