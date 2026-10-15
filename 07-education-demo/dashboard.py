@@ -224,6 +224,44 @@ document.getElementById('f-period').addEventListener('change',applyFilters);
     }
   });
 })();
+
+/* TW-530: per-section raw-data export. window.EXPORT_DATA is embedded
+   server-side; each [data-export] button downloads that section's
+   underlying data as CSV (opens in Excel). */
+function twistorCsvCell(v){
+  if(v===null||v===undefined)return '';
+  var s=String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function twistorDownloadCsv(filename, headers, rows){
+  var lines=[headers.map(twistorCsvCell).join(',')];
+  rows.forEach(function(r){lines.push(r.map(twistorCsvCell).join(','));});
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},100);
+}
+document.querySelectorAll('[data-export]').forEach(function(btn){
+  btn.addEventListener('click',function(){
+    var key=btn.getAttribute('data-export');
+    var ds=(window.EXPORT_DATA||{})[key];
+    if(!ds)return;
+    if(key==='kpi'){
+      var rows=[];
+      ds.cards.forEach(function(c){
+        rows.push(['Metric: '+c.name]);
+        rows.push(c.headers);
+        c.rows.forEach(function(r){rows.push(r);});
+        rows.push([]);
+      });
+      twistorDownloadCsv(ds.filename,['section','columns','values'],rows);
+      return;
+    }
+    twistorDownloadCsv(ds.filename, ds.headers, ds.rows);
+  });
+});
 """
 
 
@@ -817,6 +855,13 @@ section.block h2{font-size:24px;font-weight:750;letter-spacing:-.015em;
   color:var(--accent-deep);cursor:pointer;font-family:inherit}
 .drill-btn:hover{border-color:var(--accent-deep);background:#f2faf9}
 .drill-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.export-row{margin-top:14px}
+.export-btn{background:none;border:1px solid var(--hairline);
+  border-radius:6px;padding:8px 14px;font-size:13.5px;font-weight:700;
+  color:var(--accent-deep);cursor:pointer;font-family:inherit}
+.export-btn:hover{border-color:var(--accent-deep);background:#f2faf9}
+.export-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.export-hint{font-size:12.5px;color:var(--muted);margin:6px 0 0}
 .drill-btn[aria-expanded="true"]{background:var(--accent-deep);color:#fff;
   border-color:var(--accent-deep)}
 .drill{margin-top:20px;background:var(--surface);border:1px solid var(--hairline);
@@ -915,6 +960,8 @@ def _kpi_cards_html(blocks, callouts):
         "open &ldquo;How this is calculated&rdquo; on any card. "
         "Open &ldquo;See the schools behind this&rdquo; on any card to "
         "trace the number back to its schools.</p>"
+        '<div class="export-row"><button class="export-btn" data-export="kpi">Download metrics data (CSV)</button>'
+        '<p class="export-hint">Every metric and its school-level detail, as a CSV file that opens in Excel.</p></div>'
         '<div class="kpi-grid">'
     )
     for i, b in enumerate(blocks):
@@ -1372,6 +1419,91 @@ def compute_overlays(monthly_rows):
     return callouts, metrics_data, logistic_data
 
 
+def _export_payload(by_key, per_period, schools, periods, blocks):
+    """Raw data behind each dashboard section, for the CSV export buttons.
+
+    TW-530: the district's Q&A requires every data section to offer a raw-data
+    download. The payload is embedded as window.EXPORT_DATA and converted to
+    CSV client-side (stdlib JSON on the server; Blob download in the browser).
+    Rates are exported as decimals, not display strings — the underlying data,
+    not the visual.
+    """
+    trend_rows = []
+    for s in schools:
+        for prd in periods:
+            m = by_key.get((s, prd))
+            trend_rows.append(
+                [s, prd, m["attendance_rate"] if m else None]
+            )
+    trend_rows.append(["DISTRICT (weighted)", "all", None])
+    for prd in periods:
+        trend_rows.append(["DISTRICT (weighted)", prd, per_period.get(prd)])
+
+    table_rows = []
+    for s in schools:
+        for prd in periods:
+            m = by_key.get((s, prd))
+            if m is None:
+                table_rows.append([s, prd, None, None, None, None, None, "Data gap"])
+                continue
+            rate = m["attendance_rate"]
+            d_rate = per_period.get(prd)
+            vs = (rate - d_rate) if (rate is not None and d_rate is not None) else None
+            note = (
+                f"Small n ({m['student_period_records']})"
+                if m["student_period_records"] < 20
+                else ""
+            )
+            table_rows.append(
+                [
+                    s,
+                    prd,
+                    rate,
+                    vs,
+                    m["enrolled_days"],
+                    m["present_days"],
+                    m["student_period_records"],
+                    note,
+                ]
+            )
+
+    kpi_cards = []
+    for b in blocks:
+        kpi_cards.append(
+            {
+                "name": b.get("name", ""),
+                "headers": list(b.get("table_headers", [])),
+                "rows": [list(r) for r in b.get("table_rows", [])],
+            }
+        )
+
+    return {
+        "trend": {
+            "filename": "attendance-trend-data.csv",
+            "headers": ["school", "period", "attendance_rate"],
+            "rows": trend_rows,
+        },
+        "kpi": {
+            "filename": "attendance-key-metrics.csv",
+            "cards": kpi_cards,
+        },
+        "table": {
+            "filename": "attendance-school-period-table.csv",
+            "headers": [
+                "school",
+                "period",
+                "attendance_rate",
+                "vs_district_pp",
+                "enrolled_days",
+                "present_days",
+                "student_period_records",
+                "note",
+            ],
+            "rows": table_rows,
+        },
+    }
+
+
 def render_full(
     rows,
     *,
@@ -1416,6 +1548,9 @@ def render_full(
         for s in schools
     }
     body_rows = _performance_rows(by_key, per_period, schools, periods)
+    export_blob = json.dumps(
+        _export_payload(by_key, per_period, schools, periods, metrics_data["blocks"])
+    ).replace("</", "<\\/")
     period_label = f"{periods[0]} &ndash; {periods[-1]}" if periods else "no periods"
     period_range = (
         f"{_fmt_period(periods[0])} &ndash; {_fmt_period(periods[-1])}"
@@ -1462,6 +1597,8 @@ daily attendance grain</p>
 <p class="chart-cap">Bold teal line: district weighted average.
 Gray lines: individual schools. Breaks mark periods with no reported data
 &mdash; never interpolated.</p>
+<div class="export-row"><button class="export-btn" data-export="trend">Download trend data (CSV)</button>
+<p class="export-hint">The raw numbers behind this chart, as a CSV file that opens in Excel.</p></div>
 {_trend_strip_html(callouts)}
 </section>
 {_kpi_cards_html(metrics_data["blocks"], callouts)}
@@ -1481,6 +1618,8 @@ red is below 90%, amber is 90&ndash;93%.</p>
 <th scope="col" class="num">Records</th><th scope="col">Note</th></tr></thead>
 <tbody>{"".join(body_rows)}</tbody></table></div>
 <div class="count" id="count">Showing {len(body_rows)} of {len(body_rows)} rows</div>
+<div class="export-row"><button class="export-btn" data-export="table">Download table (CSV)</button>
+<p class="export-hint">Every row in this table, as a CSV file that opens in Excel.</p></div>
 </section>
 <section class="block">
 <h2>How these numbers are built</h2>
@@ -1509,7 +1648,7 @@ canonical record set. Reruns over the same source reproduce byte-identical outpu
 </section>
 <div class="foot">Prepared by Twistor Holdings LLC &middot; synthetic demonstration
 for proposal purposes only.</div>
-</div><script>{PAGE_JS}</script></body></html>"""
+</div><script>window.EXPORT_DATA={export_blob};</script><script>{PAGE_JS}</script></body></html>"""
 
 
 def demo_full() -> str:
