@@ -234,7 +234,8 @@ function twistorCsvCell(v){
   return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
 }
 function twistorDownloadCsv(filename, headers, rows){
-  var lines=[headers.map(twistorCsvCell).join(',')];
+  var lines=[];
+  if(headers&&headers.length){lines.push(headers.map(twistorCsvCell).join(','));}
   rows.forEach(function(r){lines.push(r.map(twistorCsvCell).join(','));});
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'});
   var a=document.createElement('a');
@@ -256,7 +257,7 @@ document.querySelectorAll('[data-export]').forEach(function(btn){
         c.rows.forEach(function(r){rows.push(r);});
         rows.push([]);
       });
-      twistorDownloadCsv(ds.filename,['section','columns','values'],rows);
+      twistorDownloadCsv(ds.filename,[],rows);
       return;
     }
     twistorDownloadCsv(ds.filename, ds.headers, ds.rows);
