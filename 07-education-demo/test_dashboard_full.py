@@ -3,6 +3,8 @@
 # metrics, model overlays. HTML builders are tested with injected data so
 # these tests never need sklearn/lifelines.
 
+import json
+import re
 import unittest
 
 from callouts import Callout
@@ -661,6 +663,71 @@ class HeaderTests(unittest.TestCase):
         last = m[-1]
         self.assertIn("font-size:24px", last)
         self.assertIn("font-weight:750", last)
+
+
+class ExportTests(unittest.TestCase):
+    """TW-530: every data section offers a raw-data CSV download
+    (district Q&A: each data section must export to Excel/CSV)."""
+
+    def setUp(self):
+        dashboard.summarize = _summarize
+        self.addCleanup(setattr, dashboard, "summarize", _REAL_SUMMARIZE)
+        self.page = render_full(
+            _rows(),
+            district="NKC-DEMO",
+            allowed_schools=frozenset({"Antioch Middle School", "Staley High School"}),
+            callouts=CALLOUTS,
+            metrics_data=METRICS_DATA,
+            logistic_data=LOGISTIC,
+            title="Full demo",
+        )
+        m = re.search(r"window\.EXPORT_DATA=(\{.*?\});</script>", self.page, re.S)
+        self.assertIsNotNone(m, "EXPORT_DATA blob missing from page")
+        self.data = json.loads(m.group(1))
+
+    def test_one_export_button_per_data_section(self):
+        btns = re.findall(r'data-export="(\w+)"', self.page)
+        self.assertEqual(btns, ["trend", "kpi", "table"])
+
+    def test_export_blob_has_all_datasets(self):
+        self.assertEqual(sorted(self.data.keys()), ["kpi", "table", "trend"])
+
+    def test_table_export_matches_rendered_rows(self):
+        n_tr = len(re.findall(r"<tr data-school=", self.page))
+        self.assertEqual(len(self.data["table"]["rows"]), n_tr)
+        self.assertEqual(
+            self.data["table"]["headers"],
+            [
+                "school", "period", "attendance_rate", "vs_district_pp",
+                "enrolled_days", "present_days", "student_period_records", "note",
+            ],
+        )
+
+    def test_trend_export_covers_schools_and_district(self):
+        n_tr = len(re.findall(r"<tr data-school=", self.page))
+        periods = {r[1] for r in self.data["table"]["rows"]}
+        self.assertEqual(
+            len(self.data["trend"]["rows"]), n_tr + 1 + len(periods)
+        )
+
+    def test_kpi_export_matches_metric_blocks(self):
+        self.assertEqual(
+            len(self.data["kpi"]["cards"]), len(METRICS_DATA["blocks"])
+        )
+        for card in self.data["kpi"]["cards"]:
+            self.assertTrue(card["headers"])
+            self.assertTrue(card["rows"])
+
+    def test_no_student_identifiers_in_export(self):
+        blob = json.dumps(self.data)
+        self.assertNotIn("synth-", blob)
+        self.assertNotIn("student_id", blob.lower())
+
+    def test_buttons_label_csv_honestly(self):
+        labels = re.findall(r'data-export="\w+">([^<]+)</button>', self.page)
+        self.assertEqual(len(labels), 3)
+        for label in labels:
+            self.assertIn("CSV", label)
 
 
 if __name__ == "__main__":
